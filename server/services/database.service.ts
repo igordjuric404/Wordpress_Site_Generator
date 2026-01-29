@@ -1,4 +1,5 @@
 import mysql from 'mysql2/promise';
+import fs from 'fs-extra';
 import { createServiceLogger } from '../utils/logger.js';
 import { sanitizeDbName } from '../utils/sanitize.js';
 
@@ -6,8 +7,29 @@ const logger = createServiceLogger('database');
 
 let connection: mysql.Connection | null = null;
 
+const DEFAULT_MYSQL_SOCKETS = [
+  '/tmp/mysql.sock',
+  '/opt/homebrew/var/mysql/mysql.sock',
+  '/usr/local/var/mysql/mysql.sock',
+  '/Applications/XAMPP/xamppfiles/var/mysql/mysql.sock',
+  '/Applications/MAMP/tmp/mysql/mysql.sock',
+];
+
+function resolveMysqlSocket(): string | undefined {
+  if (process.env.MYSQL_SOCKET) {
+    return process.env.MYSQL_SOCKET;
+  }
+
+  for (const socketPath of DEFAULT_MYSQL_SOCKETS) {
+    if (fs.pathExistsSync(socketPath)) {
+      return socketPath;
+    }
+  }
+  return undefined;
+}
+
 /**
- * Create a MySQL connection using MAMP configuration
+ * Create a MySQL connection using local configuration
  */
 export async function createConnection(): Promise<mysql.Connection> {
   if (connection) {
@@ -25,12 +47,14 @@ export async function createConnection(): Promise<mysql.Connection> {
     ? process.env.MYSQL_PASSWORD 
     : (process.env.MYSQL_PORT === '3306' ? '' : 'root'); // XAMPP default port is 3306
 
+  const socketPath = resolveMysqlSocket();
+
   connection = await mysql.createConnection({
     host: process.env.MYSQL_HOST || 'localhost',
     port: parseInt(process.env.MYSQL_PORT || '3306', 10),
     user: process.env.MYSQL_USER || 'root',
     password: password,
-    socketPath: process.env.MYSQL_SOCKET || '/Applications/XAMPP/xamppfiles/var/mysql/mysql.sock',
+    ...(socketPath ? { socketPath } : {}),
   });
 
   logger.info('MySQL connection established');

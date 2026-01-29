@@ -10,7 +10,7 @@ npm run start:all
 
 That's it! This single command will:
 1. ✅ Kill any processes on ports 3000 and 5173 (clean start)
-2. ✅ Automatically start MySQL and Apache (via XAMPP)
+2. ✅ Automatically start MySQL and Apache (Homebrew services, fallback to XAMPP/MAMP)
 3. ✅ Verify WP-CLI is installed
 4. ✅ Start both Express backend and React frontend servers
 
@@ -21,16 +21,17 @@ The app will be available at:
 ## Prerequisites
 
 - **Node.js** 22.x LTS or higher
-- **XAMPP** (or MAMP) installed
+- **Homebrew** (recommended) or **XAMPP/MAMP**
+- **MySQL + Apache**:
+  - Homebrew: `brew install mysql httpd`
+  - XAMPP/MAMP: install via their installers
 - **WP-CLI**: `brew install wp-cli`
 - **Anthropic API Key** (optional, for AI content generation - add to `.env`)
 
 ## Configuration
 
-The `.env` file is pre-configured for XAMPP. If using MAMP, update:
-- `MYSQL_PORT=8889`
-- `MYSQL_SOCKET=/Applications/MAMP/tmp/mysql/mysql.sock`
-- `WEB_ROOT=/Applications/MAMP/htdocs`
+The `.env` file is pre-configured for Homebrew. If using MAMP or XAMPP, update:
+- `MYSQL_PORT`, `MYSQL_SOCKET`, `WEB_ROOT`, `BASE_URL`, and `PHP_PATH` (see `.env.example`)
 
 ## Other Commands
 
@@ -55,8 +56,8 @@ npm run build
 
 The `start:all` script uses multiple methods to start MySQL automatically:
 
-1. **First**: Tries to start MySQL without sudo (sometimes works)
-2. **Second**: Uses AppleScript to automate XAMPP Control Panel (no password!)
+1. **First**: Starts Homebrew services (mysql + httpd)
+2. **Second**: Tries to start MySQL without sudo (XAMPP/MAMP)
 3. **Third**: Falls back to manual instructions if automation fails
 
 If MySQL can't start automatically, the app will still launch - you'll just need to start MySQL manually before generating sites.
@@ -77,8 +78,8 @@ sudo nano /Applications/XAMPP/xamppfiles/etc/php.ini
 
 ### MySQL Connection Issues
 **MySQL won't start automatically?**
-- The script will show instructions
-- Or manually: Open XAMPP Control Panel → Click "Start" next to MySQL
+- Homebrew: `brew services start mysql`
+- XAMPP: Open XAMPP Control Panel → Click "Start" next to MySQL
 - Or run: `npm run start:xampp`
 
 **MySQL socket not found?**
@@ -86,8 +87,9 @@ sudo nano /Applications/XAMPP/xamppfiles/etc/php.ini
 - Start MySQL first, then the socket will appear
 
 ### Apache Not Running
-- Check XAMPP Control Panel: Apache should show "Running"
-- Test: Open http://localhost (should show XAMPP page)
+- Homebrew: `brew services start httpd`
+- XAMPP: Open XAMPP Control Panel → Click "Start" next to Apache
+- Test: Open `BASE_URL` (default Homebrew httpd is http://localhost:8080)
 - Try: `npm run start:xampp`
 
 ### Port Issues

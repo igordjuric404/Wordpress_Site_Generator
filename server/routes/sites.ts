@@ -2,8 +2,8 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { SiteConfig, NicheId } from '../../shared/types.js';
 import { SUPPORTED_NICHES } from '../../shared/types.js';
-import { getRecentJobs, getFailedJobs, getJob, getJobLogs } from '../db/jobs.js';
-import { generateSite, deleteSite, resumeJob } from '../services/site-generator.service.js';
+import { getRecentJobs, getFailedJobs, getJob, getJobLogs, getJobsByStatus } from '../db/jobs.js';
+import { generateSite, deleteSite, resumeJob, cancelJob, bulkDeleteSites } from '../services/site-generator.service.js';
 import { createServiceLogger } from '../utils/logger.js';
 
 const logger = createServiceLogger('routes/sites');
@@ -119,6 +119,57 @@ sitesRouter.post('/:id/resume', async (req: Request<{ id: string }>, res: Respon
     const errorMessage = err instanceof Error ? err.message : 'Failed to resume job';
     logger.error({ error: err, jobId: req.params.id }, 'Failed to resume job');
     res.status(500).json({ success: false, error: errorMessage });
+  }
+});
+
+// POST /api/sites/:id/cancel - Cancel in-progress job
+sitesRouter.post('/:id/cancel', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const { id } = req.params;
+    const job = await cancelJob(id);
+    res.json({ success: true, data: job });
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Failed to cancel job';
+    logger.error({ error: err, jobId: req.params.id }, 'Failed to cancel job');
+    res.status(500).json({ success: false, error: errorMessage });
+  }
+});
+
+// DELETE /api/sites/bulk - Bulk delete sites
+sitesRouter.post('/bulk-delete', async (req: Request, res: Response) => {
+  try {
+    const { jobIds } = req.body;
+
+    if (!Array.isArray(jobIds) || jobIds.length === 0) {
+      res.status(400).json({ success: false, error: 'jobIds array is required' });
+      return;
+    }
+
+    const result = await bulkDeleteSites(jobIds);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Failed to bulk delete sites';
+    logger.error({ error: err }, 'Failed to bulk delete sites');
+    res.status(500).json({ success: false, error: errorMessage });
+  }
+});
+
+// GET /api/sites/by-status/:status - Get jobs by status
+sitesRouter.get('/by-status/:status', async (req: Request<{ status: string }>, res: Response) => {
+  try {
+    const { status } = req.params;
+    const validStatuses = ['pending', 'in_progress', 'completed', 'failed', 'cancelled', 'deleted'];
+    
+    if (!validStatuses.includes(status)) {
+      res.status(400).json({ success: false, error: 'Invalid status' });
+      return;
+    }
+
+    const jobs = getJobsByStatus(status as any);
+    res.json({ success: true, data: jobs });
+  } catch (err) {
+    logger.error({ error: err }, 'Failed to get jobs by status');
+    res.status(500).json({ success: false, error: 'Failed to get jobs by status' });
   }
 });
 

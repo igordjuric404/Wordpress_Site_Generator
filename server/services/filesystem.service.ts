@@ -5,18 +5,41 @@ import { slugify } from '../utils/sanitize.js';
 
 const logger = createServiceLogger('filesystem');
 
+const DEFAULT_WEB_ROOTS = [
+  '/opt/homebrew/var/www',
+  '/usr/local/var/www',
+  '/Applications/XAMPP/xamppfiles/htdocs',
+  '/Applications/MAMP/htdocs',
+];
+
 /**
- * Get the web root directory (MAMP htdocs)
+ * Get the web root directory (auto-detect if not set)
  */
 export function getWebRoot(): string {
-  return process.env.WEB_ROOT || '/Applications/MAMP/htdocs';
+  if (process.env.WEB_ROOT) {
+    return process.env.WEB_ROOT;
+  }
+
+  const detected = DEFAULT_WEB_ROOTS.find((root) => fs.pathExistsSync(root));
+  return detected || DEFAULT_WEB_ROOTS[0];
 }
 
 /**
  * Get the base URL for local sites
  */
 export function getBaseUrl(): string {
-  return process.env.BASE_URL || 'http://localhost:8888';
+  if (process.env.BASE_URL) {
+    return process.env.BASE_URL;
+  }
+
+  const webRoot = getWebRoot();
+  if (webRoot.includes('/Applications/MAMP/htdocs')) {
+    return 'http://localhost:8888';
+  }
+  if (webRoot.includes('/opt/homebrew/var/www') || webRoot.includes('/usr/local/var/www')) {
+    return 'http://localhost:8080';
+  }
+  return 'http://localhost';
 }
 
 /**

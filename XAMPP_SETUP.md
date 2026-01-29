@@ -1,5 +1,9 @@
 # XAMPP Setup Guide
 
+If you prefer to avoid opening XAMPP, the app now defaults to **Homebrew services**
+(`brew install mysql httpd` and `brew services start mysql httpd`). Use XAMPP only
+if you want to keep your existing setup.
+
 ## Found Your XAMPP Installation
 
 ✅ **XAMPP Location**: `/Applications/XAMPP`

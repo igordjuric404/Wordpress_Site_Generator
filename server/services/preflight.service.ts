@@ -50,6 +50,123 @@ async function detectBestMampPhp(): Promise<string | null> {
   return null;
 }
 
+async function detectPhpPath(): Promise<string | null> {
+  const envPath = process.env.PHP_PATH || process.env.WP_CLI_PHP;
+  if (envPath && await fs.pathExists(envPath)) {
+    return envPath;
+  }
+
+  // Prefer Homebrew PHP first (since we're using Homebrew services)
+  try {
+    const { stdout } = await execa('which', ['php'], { shell: false, reject: false });
+    const phpPath = stdout.trim();
+    if (phpPath && await fs.pathExists(phpPath)) {
+      // Check if it's Homebrew PHP
+      if (phpPath.includes('/opt/homebrew') || phpPath.includes('/usr/local')) {
+        return phpPath;
+      }
+    }
+  } catch {
+    // Ignore
+  }
+
+  // Check common Homebrew PHP locations
+  const homebrewPhpPaths = [
+    '/opt/homebrew/bin/php',
+    '/usr/local/bin/php',
+  ];
+  for (const phpPath of homebrewPhpPaths) {
+    if (await fs.pathExists(phpPath)) {
+      return phpPath;
+    }
+  }
+
+  // Fallback to XAMPP if Homebrew PHP not found
+  const xamppPhp = '/Applications/XAMPP/xamppfiles/bin/php';
+  if (await fs.pathExists(xamppPhp)) {
+    return xamppPhp;
+  }
+
+  const mampPhp = await detectBestMampPhp();
+  if (mampPhp) {
+    return mampPhp;
+  }
+
+  return null;
+}
+
+async function getPhpVersion(phpPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execa(phpPath, ['-v'], { shell: false, reject: false });
+    const match = stdout.match(/PHP\s+([\d.]+)/);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
+const DEFAULT_MYSQL_SOCKETS = [
+  '/tmp/mysql.sock',
+  '/opt/homebrew/var/mysql/mysql.sock',
+  '/usr/local/var/mysql/mysql.sock',
+  '/Applications/XAMPP/xamppfiles/var/mysql/mysql.sock',
+  '/Applications/MAMP/tmp/mysql/mysql.sock',
+];
+
+const DEFAULT_WEB_ROOTS = [
+  '/opt/homebrew/var/www',
+  '/usr/local/var/www',
+  '/Applications/XAMPP/xamppfiles/htdocs',
+  '/Applications/MAMP/htdocs',
+];
+
+async function resolveMysqlSocket(): Promise<string | null> {
+  if (process.env.MYSQL_SOCKET && await fs.pathExists(process.env.MYSQL_SOCKET)) {
+    return process.env.MYSQL_SOCKET;
+  }
+
+  for (const socketPath of DEFAULT_MYSQL_SOCKETS) {
+    if (await fs.pathExists(socketPath)) {
+      return socketPath;
+    }
+  }
+  return null;
+}
+
+async function isPortListening(port: number): Promise<boolean> {
+  try {
+    const { stdout } = await execa('lsof', ['-iTCP:' + port, '-sTCP:LISTEN'], { shell: false, reject: false });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+async function checkApacheRunning(): Promise<boolean> {
+  const urlsToCheck = [
+    process.env.BASE_URL,
+    'http://localhost/',
+    'http://localhost:8080/',
+    'http://localhost:8888/',
+  ].filter(Boolean);
+
+  for (const url of urlsToCheck) {
+    try {
+      const { stdout, exitCode } = await execa('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', url], {
+        shell: false,
+        reject: false,
+        timeout: 3000,
+      });
+      if (exitCode === 0 && stdout.trim() !== '000') {
+        return true;
+      }
+    } catch {
+      // Try next URL
+    }
+  }
+  return false;
+}
+
 /**
  * Check if PHP version meets WordPress requirements (>= 7.4)
  */
@@ -97,24 +214,23 @@ export async function runPreflightChecks(forceRefresh = false): Promise<Prefligh
       result.checks.wpCliVersion = versionMatch[1];
     }
     
-    // Auto-detect best PHP version from MAMP
-    const mampPhpPath = await detectBestMampPhp();
-    if (mampPhpPath) {
-      result.checks.phpPath = mampPhpPath;
-      
-      // Extract PHP version from path
-      const phpVersionMatch = mampPhpPath.match(/php([\d.]+)/);
-      if (phpVersionMatch) {
-        result.checks.phpVersion = phpVersionMatch[1];
-        result.checks.phpMeetsRequirements = checkPhpVersion(phpVersionMatch[1]);
+    const phpPath = await detectPhpPath();
+    if (phpPath) {
+      result.checks.phpPath = phpPath;
+
+      const phpVersion = await getPhpVersion(phpPath);
+      if (phpVersion) {
+        result.checks.phpVersion = phpVersion;
+        result.checks.phpMeetsRequirements = checkPhpVersion(phpVersion);
       }
-      
-      // Auto-set WP_CLI_PHP environment variable for all subsequent commands
-      process.env.WP_CLI_PHP = mampPhpPath;
-      
-      logger.info({ phpPath: mampPhpPath, phpVersion: result.checks.phpVersion }, 'Auto-configured WP-CLI PHP');
+
+      // Auto-set WP_CLI_PHP and PHP_PATH for all subsequent commands
+      process.env.WP_CLI_PHP = phpPath;
+      process.env.PHP_PATH = phpPath;
+
+      logger.info({ phpPath, phpVersion: result.checks.phpVersion }, 'Auto-configured PHP for WP-CLI');
     } else {
-      result.warnings.push('Could not auto-detect MAMP/XAMPP PHP. Using system default.');
+      result.warnings.push('Could not auto-detect PHP. Install PHP via Homebrew or configure PHP_PATH in .env.');
     }
   } catch (err) {
     result.checks.wpCliInstalled = false;
@@ -123,33 +239,24 @@ export async function runPreflightChecks(forceRefresh = false): Promise<Prefligh
   }
   
   // 2. Check MySQL socket exists
-  const mysqlSocket = process.env.MYSQL_SOCKET || '/Applications/XAMPP/xamppfiles/var/mysql/mysql.sock';
-  result.checks.mysqlSocket = await fs.pathExists(mysqlSocket);
+  const mysqlSocket = await resolveMysqlSocket();
+  result.checks.mysqlSocket = Boolean(mysqlSocket);
   if (!result.checks.mysqlSocket) {
-    result.warnings.push(`MySQL socket not found at ${mysqlSocket}. Is MySQL running?`);
+    result.warnings.push('MySQL socket not found. Is MySQL running?');
   }
   
   // 3. Test MySQL connection (will be done by database service)
   // For now, just check if socket exists as a proxy
-  result.checks.mysqlConnected = result.checks.mysqlSocket;
+  const mysqlPort = parseInt(process.env.MYSQL_PORT || '3306', 10);
+  result.checks.mysqlConnected = result.checks.mysqlSocket || await isPortListening(mysqlPort);
   if (!result.checks.mysqlConnected) {
-    result.errors.push('MySQL is not running. Start MySQL server (XAMPP/MAMP).');
+    result.errors.push('MySQL is not running. Start MySQL (Homebrew or XAMPP/MAMP).');
   }
   
   // 4. Check Apache web server status
-  try {
-    const { stdout, exitCode } = await execa('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', 'http://localhost/'], {
-      shell: false,
-      reject: false,
-      timeout: 3000,
-    });
-    result.checks.apacheRunning = exitCode === 0 && stdout.trim() !== '000';
-    if (!result.checks.apacheRunning) {
-      result.errors.push('Apache web server is not running. Start Apache (XAMPP/MAMP).');
-    }
-  } catch {
-    result.checks.apacheRunning = false;
-    result.errors.push('Apache web server is not running. Start Apache (XAMPP/MAMP).');
+  result.checks.apacheRunning = await checkApacheRunning();
+  if (!result.checks.apacheRunning) {
+    result.errors.push('Apache web server is not running. Start Apache (Homebrew or XAMPP/MAMP).');
   }
   
   // 5. Verify Anthropic API key format
@@ -159,8 +266,8 @@ export async function runPreflightChecks(forceRefresh = false): Promise<Prefligh
     result.warnings.push('Anthropic API key not configured. AI content generation will use placeholders.');
   }
   
-  // 6. Check web root (XAMPP/MAMP htdocs)
-  const webRoot = process.env.WEB_ROOT || '/Applications/XAMPP/xamppfiles/htdocs';
+  // 6. Check web root (Homebrew/XAMPP/MAMP)
+  const webRoot = process.env.WEB_ROOT || DEFAULT_WEB_ROOTS.find((root) => fs.pathExistsSync(root)) || DEFAULT_WEB_ROOTS[0];
   const webRootExists = await fs.pathExists(webRoot);
   result.checks.webRootValid = webRootExists;
   
@@ -173,7 +280,7 @@ export async function runPreflightChecks(forceRefresh = false): Promise<Prefligh
       result.errors.push(`Web root not writable: ${webRoot}`);
     }
   } else {
-    result.errors.push(`Web root not found: ${webRoot}. Install XAMPP/MAMP or update WEB_ROOT in .env`);
+    result.errors.push(`Web root not found: ${webRoot}. Update WEB_ROOT in .env (Homebrew/XAMPP/MAMP).`);
   }
   
   // Set overall status

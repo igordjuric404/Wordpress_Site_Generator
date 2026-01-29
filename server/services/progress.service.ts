@@ -39,12 +39,12 @@ export function emitProgress(event: ProgressEvent): void {
 /**
  * Create a progress helper for a specific job
  */
-export function createProgressHelper(jobId: string, totalSteps: number) {
-  let currentStep = 0;
+export function createProgressHelper(jobId: string, totalSteps: number, initialStep: number = 0) {
+  let currentStep = initialStep;
 
   return {
     start(message: string) {
-      currentStep = 0;
+      currentStep = initialStep;
       emitProgress({
         jobId,
         step: currentStep,
@@ -85,6 +85,17 @@ export function createProgressHelper(jobId: string, totalSteps: number) {
         step: currentStep,
         totalSteps,
         status: 'failed',
+        message,
+        timestamp: new Date().toISOString(),
+      });
+    },
+
+    cancel(message: string = 'Job cancelled') {
+      emitProgress({
+        jobId,
+        step: currentStep,
+        totalSteps,
+        status: 'cancelled',
         message,
         timestamp: new Date().toISOString(),
       });

@@ -7,7 +7,14 @@
 import { execa } from 'execa';
 import fs from 'fs-extra';
 
-const MYSQL_SOCKET = process.env.MYSQL_SOCKET || '/Applications/XAMPP/xamppfiles/var/mysql/mysql.sock';
+const MYSQL_SOCKETS = [
+  process.env.MYSQL_SOCKET,
+  '/tmp/mysql.sock',
+  '/opt/homebrew/var/mysql/mysql.sock',
+  '/usr/local/var/mysql/mysql.sock',
+  '/Applications/XAMPP/xamppfiles/var/mysql/mysql.sock',
+  '/Applications/MAMP/tmp/mysql/mysql.sock',
+].filter(Boolean);
 const MYSQL_START_SCRIPT = '/Applications/XAMPP/xamppfiles/bin/mysql.server';
 
 // Colors
@@ -20,11 +27,66 @@ function log(message, color = reset) {
 }
 
 async function checkMySQLRunning() {
+  for (const socketPath of MYSQL_SOCKETS) {
+    try {
+      if (await fs.pathExists(socketPath)) {
+        return true;
+      }
+    } catch {
+      // Ignore and keep checking
+    }
+  }
+  return false;
+}
+
+async function canUseBrew() {
   try {
-    return await fs.pathExists(MYSQL_SOCKET);
+    const { exitCode } = await execa('brew', ['--version'], { shell: false, reject: false });
+    return exitCode === 0;
   } catch {
     return false;
   }
+}
+
+async function listBrewServices() {
+  try {
+    const { stdout, exitCode } = await execa('brew', ['services', 'list'], { shell: false, reject: false });
+    if (exitCode !== 0) return [];
+
+    return stdout
+      .split('\n')
+      .slice(1)
+      .filter(Boolean)
+      .map((line) => {
+        const [name, status] = line.trim().split(/\s+/);
+        return { name, status };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function findMysqlService(services) {
+  const candidates = ['mysql', 'mysql@8.4', 'mysql@8.0', 'mysql@5.7'];
+  const serviceNames = new Set(services.map((service) => service.name));
+  return candidates.find((candidate) => serviceNames.has(candidate)) || null;
+}
+
+async function tryStartMysqlWithBrew() {
+  if (!(await canUseBrew())) return false;
+
+  const services = await listBrewServices();
+  const mysqlService = findMysqlService(services);
+  if (!mysqlService) return false;
+
+  const service = services.find((svc) => svc.name === mysqlService);
+  if (service?.status !== 'started') {
+    await execa('brew', ['services', 'start', mysqlService], { shell: false, reject: false });
+  }
+
+  // Wait a moment for MySQL to start and check socket
+  await new Promise((resolve) => setTimeout(resolve, 2000));
+  return await checkMySQLRunning();
 }
 
 async function startMySQLWithoutSudo() {
@@ -119,6 +181,12 @@ async function main() {
   }
 
   log('Starting MySQL...', yellow);
+
+  // Try method 0: Homebrew services
+  if (await tryStartMysqlWithBrew()) {
+    log('✓ MySQL started via Homebrew', green);
+    return 0;
+  }
 
   // Try method 1: Start without sudo using mysql.server
   if (await startMySQLWithoutSudo()) {

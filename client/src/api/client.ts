@@ -28,6 +28,11 @@ export async function getSites(): Promise<Job[]> {
   return response.data || [];
 }
 
+export async function getFailedSites(): Promise<Job[]> {
+  const response = await request<Job[]>('/sites/failed');
+  return response.data || [];
+}
+
 export async function getSite(id: string): Promise<Job & { logs?: any[] }> {
   const response = await request<Job & { logs?: any[] }>(`/sites/${id}`);
   return response.data!;
@@ -52,6 +57,26 @@ export async function resumeSite(id: string): Promise<Job> {
     method: 'POST',
   });
   return response.data!;
+}
+
+export async function cancelSite(id: string): Promise<Job> {
+  const response = await request<Job>(`/sites/${id}/cancel`, {
+    method: 'POST',
+  });
+  return response.data!;
+}
+
+export async function bulkDeleteSites(jobIds: string[]): Promise<{ deleted: number; failed: number; errors: string[] }> {
+  const response = await request<{ deleted: number; failed: number; errors: string[] }>('/sites/bulk-delete', {
+    method: 'POST',
+    body: JSON.stringify({ jobIds }),
+  });
+  return response.data!;
+}
+
+export async function getJobsByStatus(status: string): Promise<Job[]> {
+  const response = await request<Job[]>(`/sites/by-status/${status}`);
+  return response.data || [];
 }
 
 export async function getNiches(): Promise<

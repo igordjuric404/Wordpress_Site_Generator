@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs-extra';
-import type { Job, JobStatus } from '../../shared/types.js';
+import type { Job, JobStatus, SiteConfig } from '../../shared/types.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = path.join(__dirname, '../../data');
@@ -22,6 +22,7 @@ export function initDatabase(): void {
       business_name TEXT NOT NULL,
       niche TEXT NOT NULL,
       site_type TEXT NOT NULL,
+      config_json TEXT,
       status TEXT NOT NULL CHECK(status IN ('pending', 'in_progress', 'completed', 'failed', 'cancelled', 'deleted')),
       current_step INTEGER DEFAULT 0,
       total_steps INTEGER NOT NULL,
@@ -52,6 +53,8 @@ export function initDatabase(): void {
     CREATE INDEX IF NOT EXISTS idx_jobs_created ON jobs(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_job_logs_job_id ON job_logs(job_id);
   `);
+
+  ensureJobsColumn('config_json', 'TEXT');
 }
 
 export function getDatabase(): Database.Database {
@@ -63,11 +66,21 @@ export function getDatabase(): Database.Database {
 
 // Convert database row to Job type
 function rowToJob(row: any): Job {
+  let config: SiteConfig | undefined;
+  if (row.config_json) {
+    try {
+      config = JSON.parse(row.config_json) as SiteConfig;
+    } catch {
+      config = undefined;
+    }
+  }
+
   return {
     id: row.id,
     businessName: row.business_name,
     niche: row.niche,
     siteType: row.site_type,
+    config,
     status: row.status,
     currentStep: row.current_step,
     totalSteps: row.total_steps,
@@ -85,26 +98,36 @@ function rowToJob(row: any): Job {
   };
 }
 
+function ensureJobsColumn(columnName: string, columnType: string): void {
+  const columns = getDatabase().prepare('PRAGMA table_info(jobs)').all() as Array<{ name: string }>;
+  if (!columns.some((column) => column.name === columnName)) {
+    getDatabase().exec(`ALTER TABLE jobs ADD COLUMN ${columnName} ${columnType}`);
+  }
+}
+
 export function createJob(job: {
   id: string;
   businessName: string;
   niche: string;
   siteType: 'standard' | 'ecommerce';
   totalSteps: number;
+  config?: SiteConfig;
 }): Job {
   const stmt = getDatabase().prepare(`
-    INSERT INTO jobs (id, business_name, niche, site_type, status, total_steps, created_at)
-    VALUES (?, ?, ?, ?, 'pending', ?, ?)
+    INSERT INTO jobs (id, business_name, niche, site_type, config_json, status, total_steps, created_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
   `);
   
   const createdAt = new Date().toISOString();
-  stmt.run(job.id, job.businessName, job.niche, job.siteType, job.totalSteps, createdAt);
+  const configJson = job.config ? JSON.stringify(job.config) : null;
+  stmt.run(job.id, job.businessName, job.niche, job.siteType, configJson, job.totalSteps, createdAt);
   
   return {
     id: job.id,
     businessName: job.businessName,
     niche: job.niche as any,
     siteType: job.siteType,
+    config: job.config,
     status: 'pending',
     currentStep: 0,
     totalSteps: job.totalSteps,
@@ -155,7 +178,7 @@ export function updateJobStatus(jobId: string, status: JobStatus, error?: string
     values.push(error);
   }
   
-  if (status === 'completed' || status === 'failed') {
+  if (status === 'completed' || status === 'failed' || status === 'cancelled') {
     updates.push('completed_at = ?');
     values.push(new Date().toISOString());
   }
@@ -166,6 +189,19 @@ export function updateJobStatus(jobId: string, status: JobStatus, error?: string
     UPDATE jobs SET ${updates.join(', ')} WHERE id = ?
   `);
   stmt.run(...values);
+}
+
+export function resetJobForResume(jobId: string, step: number): void {
+  const stmt = getDatabase().prepare(`
+    UPDATE jobs
+    SET status = 'in_progress',
+        current_step = ?,
+        error = NULL,
+        started_at = ?,
+        completed_at = NULL
+    WHERE id = ?
+  `);
+  stmt.run(step, new Date().toISOString(), jobId);
 }
 
 export function updateJobSiteInfo(
@@ -228,6 +264,26 @@ export function getFailedJobs(): Job[] {
   const stmt = getDatabase().prepare(`
     SELECT * FROM jobs 
     WHERE status = 'failed'
+    ORDER BY created_at DESC
+  `);
+  const rows = stmt.all();
+  return rows.map(rowToJob);
+}
+
+export function getJobsByStatus(status: JobStatus): Job[] {
+  const stmt = getDatabase().prepare(`
+    SELECT * FROM jobs 
+    WHERE status = ?
+    ORDER BY created_at DESC
+  `);
+  const rows = stmt.all(status);
+  return rows.map(rowToJob);
+}
+
+export function getAllJobs(): Job[] {
+  const stmt = getDatabase().prepare(`
+    SELECT * FROM jobs 
+    WHERE status != 'deleted'
     ORDER BY created_at DESC
   `);
   const rows = stmt.all();

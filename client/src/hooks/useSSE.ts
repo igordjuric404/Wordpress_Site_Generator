@@ -52,7 +52,7 @@ export function useSSE(jobId: string | null, options: UseSSEOptions = {}) {
           onCompleteRef.current?.(data);
         }
 
-        if (data.status === 'failed') {
+        if (data.status === 'failed' || data.status === 'cancelled') {
           setError(data.message);
           setIsComplete(true);
         }

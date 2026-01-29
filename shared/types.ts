@@ -74,6 +74,7 @@ export interface Job {
   businessName: string;
   niche: NicheId;
   siteType: 'standard' | 'ecommerce';
+  config?: SiteConfig;
   status: JobStatus;
   currentStep: number;
   totalSteps: number;
@@ -95,7 +96,7 @@ export interface ProgressEvent {
   jobId: string;
   step: number;
   totalSteps: number;
-  status: 'in_progress' | 'completed' | 'failed';
+  status: 'in_progress' | 'completed' | 'failed' | 'cancelled';
   message: string;
   timestamp: string;
   aiCost?: number;

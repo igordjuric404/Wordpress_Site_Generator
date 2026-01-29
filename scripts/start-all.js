@@ -11,7 +11,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const MYSQL_SOCKET = process.env.MYSQL_SOCKET || '/Applications/XAMPP/xamppfiles/var/mysql/mysql.sock';
+const DEFAULT_MYSQL_SOCKETS = [
+  process.env.MYSQL_SOCKET,
+  '/tmp/mysql.sock',
+  '/opt/homebrew/var/mysql/mysql.sock',
+  '/usr/local/var/mysql/mysql.sock',
+  '/Applications/XAMPP/xamppfiles/var/mysql/mysql.sock',
+  '/Applications/MAMP/tmp/mysql/mysql.sock',
+].filter(Boolean);
 
 // Colors for terminal output
 const green = '\x1b[32m';
@@ -28,28 +35,226 @@ function logHeader() {
   console.log('');
 }
 
-async function checkMySQL() {
+async function findMysqlSocket() {
+  for (const socketPath of DEFAULT_MYSQL_SOCKETS) {
+    try {
+      if (await fs.pathExists(socketPath)) {
+        return socketPath;
+      }
+    } catch {
+      // Ignore and keep checking
+    }
+  }
+  return null;
+}
+
+async function isPortListening(port) {
   try {
-    return await fs.pathExists(MYSQL_SOCKET);
+    const { stdout } = await execa('lsof', ['-iTCP:' + port, '-sTCP:LISTEN'], {
+      shell: false,
+      reject: false,
+    });
+    return stdout.trim().length > 0;
   } catch {
     return false;
   }
 }
 
+async function checkMySQL() {
+  const socketPath = await findMysqlSocket();
+  if (socketPath) return true;
+
+  const port = parseInt(process.env.MYSQL_PORT || '3306', 10);
+  return await isPortListening(port);
+}
+
 async function checkApache() {
+  const urlsToCheck = [
+    process.env.BASE_URL,
+    'http://localhost/',
+    'http://localhost:8080/',
+    'http://localhost:8888/',
+  ].filter(Boolean);
+
+  for (const url of urlsToCheck) {
+    try {
+      const { exitCode, stdout } = await execa('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', url], {
+        shell: false,
+        reject: false,
+        timeout: 3000,
+      });
+      if (exitCode === 0 && stdout.trim() !== '000') {
+        return true;
+      }
+    } catch {
+      // Try next URL
+    }
+  }
+  return false;
+}
+
+async function canUseBrew() {
   try {
-    const { exitCode } = await execa('curl', ['-s', '-o', '/dev/null', '-w', '%{http_code}', 'http://localhost/'], {
-      shell: false,
-      reject: false,
-      timeout: 3000,
-    });
+    const { exitCode } = await execa('brew', ['--version'], { shell: false, reject: false });
     return exitCode === 0;
   } catch {
     return false;
   }
 }
 
-async function startXAMPP() {
+async function isBrewPackageInstalled(packageName) {
+  try {
+    const { exitCode } = await execa('brew', ['list', packageName], { shell: false, reject: false });
+    return exitCode === 0;
+  } catch {
+    return false;
+  }
+}
+
+async function installBrewPackage(packageName) {
+  console.log(yellow + `  Installing ${packageName} via Homebrew...` + reset);
+  try {
+    await execa('brew', ['install', packageName], { 
+      shell: false,
+      stdio: 'inherit',
+    });
+    console.log(green + `  ✓ ${packageName} installed successfully` + reset);
+    return true;
+  } catch (error) {
+    console.error(red + `  ✗ Failed to install ${packageName}:` + reset, error.message);
+    return false;
+  }
+}
+
+async function listBrewServices() {
+  try {
+    const { stdout, exitCode } = await execa('brew', ['services', 'list'], { shell: false, reject: false });
+    if (exitCode !== 0) return [];
+
+    const lines = stdout.split('\n').slice(1).filter(Boolean);
+    return lines.map((line) => {
+      const parts = line.trim().split(/\s+/);
+      return { name: parts[0], status: parts[1] || 'unknown' };
+    });
+  } catch {
+    return [];
+  }
+}
+
+function findService(services, candidates) {
+  const serviceNames = new Set(services.map((service) => service.name));
+  return candidates.find((candidate) => serviceNames.has(candidate)) || null;
+}
+
+async function ensureBrewServicesInstalled() {
+  if (!(await canUseBrew())) {
+    console.log(red + '✗ Homebrew is not installed. Please install it first:' + reset);
+    console.log('  Visit: https://brew.sh');
+    return { mysqlInstalled: false, apacheInstalled: false };
+  }
+
+  console.log(cyan + '🔍 Checking for MySQL and Apache...' + reset);
+  
+  const mysqlInstalled = await isBrewPackageInstalled('mysql') || 
+                         await isBrewPackageInstalled('mysql@8.4') ||
+                         await isBrewPackageInstalled('mysql@8.0') ||
+                         await isBrewPackageInstalled('mysql@5.7');
+  
+  const apacheInstalled = await isBrewPackageInstalled('httpd');
+
+  let mysqlToInstall = null;
+  let apacheToInstall = null;
+
+  if (!mysqlInstalled) {
+    // Try to find which MySQL version is available
+    try {
+      const { stdout } = await execa('brew', ['search', 'mysql'], { shell: false, reject: false });
+      if (stdout.includes('mysql@8.4')) {
+        mysqlToInstall = 'mysql@8.4';
+      } else if (stdout.includes('mysql@8.0')) {
+        mysqlToInstall = 'mysql@8.0';
+      } else {
+        mysqlToInstall = 'mysql';
+      }
+    } catch {
+      mysqlToInstall = 'mysql';
+    }
+  }
+
+  if (!apacheInstalled) {
+    apacheToInstall = 'httpd';
+  }
+
+  if (mysqlToInstall || apacheToInstall) {
+    console.log(yellow + '📦 Installing missing packages...' + reset);
+    
+    if (mysqlToInstall) {
+      const installed = await installBrewPackage(mysqlToInstall);
+      if (!installed) {
+        return { mysqlInstalled: false, apacheInstalled: apacheInstalled };
+      }
+    }
+    
+    if (apacheToInstall) {
+      const installed = await installBrewPackage(apacheToInstall);
+      if (!installed) {
+        return { mysqlInstalled: mysqlInstalled || !!mysqlToInstall, apacheInstalled: false };
+      }
+    }
+    
+    // Wait a moment after installation
+    await new Promise(resolve => setTimeout(resolve, 2000));
+  }
+
+  return { 
+    mysqlInstalled: mysqlInstalled || !!mysqlToInstall, 
+    apacheInstalled: apacheInstalled || !!apacheToInstall 
+  };
+}
+
+async function startBrewServices() {
+  if (!(await canUseBrew())) {
+    return { usedBrew: false, mysqlStarted: false, apacheStarted: false };
+  }
+
+  // Ensure services are installed
+  const { mysqlInstalled, apacheInstalled } = await ensureBrewServicesInstalled();
+  if (!mysqlInstalled || !apacheInstalled) {
+    return { usedBrew: true, mysqlStarted: false, apacheStarted: false };
+  }
+
+  const services = await listBrewServices();
+  const mysqlService = findService(services, ['mysql', 'mysql@8.4', 'mysql@8.0', 'mysql@5.7']);
+  const apacheService = findService(services, ['httpd']);
+
+  if (!mysqlService || !apacheService) {
+    return { usedBrew: true, mysqlStarted: false, apacheStarted: false };
+  }
+
+  const startServiceIfNeeded = async (serviceName) => {
+    const service = services.find((svc) => svc.name === serviceName);
+    if (service?.status === 'started') {
+      console.log(green + `  ✓ ${serviceName} is already running` + reset);
+      return;
+    }
+    console.log(yellow + `  Starting ${serviceName}...` + reset);
+    await execa('brew', ['services', 'start', serviceName], { shell: false, reject: false });
+    // Wait a bit for service to start
+    await new Promise(resolve => setTimeout(resolve, 3000));
+  };
+
+  await startServiceIfNeeded(mysqlService);
+  await startServiceIfNeeded(apacheService);
+
+  // Give services more time to fully start
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  const mysqlRunning = await checkMySQL();
+  const apacheRunning = await checkApache();
+  return { usedBrew: true, mysqlStarted: mysqlRunning, apacheStarted: apacheRunning };
+}
+
+async function startServices() {
   console.log(yellow + '\n📦 Starting MySQL & Apache...' + reset);
   
   // Check if both are already running
@@ -61,35 +266,32 @@ async function startXAMPP() {
     return true;
   }
 
-  try {
-    // Use the dedicated XAMPP starter script
-    const { exitCode } = await execa('node', ['scripts/start-xampp.js'], {
-      stdio: 'inherit',
-      reject: false,
-    });
+  // Try Homebrew first - it will install if needed
+  const brewResult = await startBrewServices();
+  if (brewResult.usedBrew && brewResult.mysqlStarted && brewResult.apacheStarted) {
+    console.log(green + '✓ MySQL and Apache started via Homebrew\n' + reset);
+    return true;
+  }
 
-    // Wait a bit for services to start
-    await new Promise(resolve => setTimeout(resolve, 3000));
-
-    const mysqlNowRunning = await checkMySQL();
-    const apacheNowRunning = await checkApache();
-
-    if (mysqlNowRunning && apacheNowRunning) {
-      console.log(green + '✓ MySQL and Apache started successfully\n' + reset);
-      return true;
+  if (brewResult.usedBrew) {
+    if (!brewResult.mysqlStarted) {
+      console.log(red + '✗ MySQL failed to start' + reset);
     }
-
-    if (!mysqlNowRunning || !apacheNowRunning) {
-      console.log(yellow + '⚠ Some services may not have started. Check XAMPP Control Panel\n' + reset);
+    if (!brewResult.apacheStarted) {
+      console.log(red + '✗ Apache failed to start' + reset);
     }
-    return mysqlNowRunning; // At minimum, MySQL should be running
-  } catch (error) {
-    console.error(red + '✗ Failed to start XAMPP services:' + reset, error.message);
-    console.log(yellow + '\nPlease start services manually:' + reset);
-    console.log('  • Open XAMPP Control Panel (⌘+Space → "XAMPP")');
-    console.log('  • Click "Start" next to MySQL and Apache\n');
+    console.log(yellow + '\n⚠ Some services could not start. Please check:' + reset);
+    console.log('  • MySQL: brew services list | grep mysql');
+    console.log('  • Apache: brew services list | grep httpd');
+    console.log('  • Logs: brew services info mysql && brew services info httpd\n');
     return false;
   }
+
+  // If Homebrew is not available, provide instructions
+  console.log(red + '✗ Homebrew is required for automatic service management' + reset);
+  console.log(yellow + '\nPlease install Homebrew and try again:' + reset);
+  console.log('  Visit: https://brew.sh\n');
+  return false;
 }
 
 async function checkWPCLI() {
@@ -149,10 +351,10 @@ async function main() {
   // 1. Kill any processes on ports 3000 and 5173
   await killPorts();
 
-  // 2. Check and start XAMPP services (MySQL & Apache)
-  const servicesOk = await startXAMPP();
+  // 2. Check and start MySQL/Apache services
+  const servicesOk = await startServices();
   if (!servicesOk) {
-    console.log(yellow + '⚠ XAMPP services are not running. Some features may not work.\n' + reset);
+    console.log(yellow + '⚠ MySQL/Apache services are not running. Some features may not work.\n' + reset);
   }
 
   // 3. Check WP-CLI

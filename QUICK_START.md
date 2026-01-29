@@ -8,14 +8,20 @@ npm run start:all
 
 This automatically:
 - ✓ Clears ports 3000 and 5173 (kills any running processes)
-- ✓ Starts MySQL database server
-- ✓ Starts Apache web server
+- ✓ Starts MySQL database server (Homebrew services, fallback to XAMPP/MAMP)
+- ✓ Starts Apache web server (Homebrew services, fallback to XAMPP/MAMP)
 - ✓ Starts Backend API (port 3000)
 - ✓ Starts Frontend UI (port 5173)
 
 ## If Services Don't Start Automatically:
 
-**Manual Start (Easiest):**
+**Manual Start (Homebrew):**
+```bash
+brew services start mysql
+brew services start httpd
+```
+
+**Manual Start (XAMPP):**
 1. Press ⌘+Space (Spotlight)
 2. Type "XAMPP"
 3. Open XAMPP Control Panel
@@ -26,8 +32,8 @@ This automatically:
 ## Verify Services
 
 Check that both are running:
-- MySQL socket: `ls /Applications/XAMPP/xamppfiles/var/mysql/mysql.sock`
-- Apache test: Open http://localhost in your browser (should show XAMPP page)
+- MySQL socket: `ls /tmp/mysql.sock` (or your configured `MYSQL_SOCKET`)
+- Apache test: Open `BASE_URL` (Homebrew default: http://localhost:8080)
 
 ## Full Command Reference
 

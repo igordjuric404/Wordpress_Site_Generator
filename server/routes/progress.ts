@@ -25,12 +25,18 @@ progressRouter.get('/:jobId', (req: Request<{ jobId: string }>, res: Response) =
   res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
 
   // Send initial job state
+  // If job is completed, use totalSteps as the step count
+  const step = job.status === 'completed' ? job.totalSteps : job.currentStep;
   const initialData = {
     jobId: job.id,
-    step: job.currentStep,
+    step,
     totalSteps: job.totalSteps,
     status: job.status === 'completed' ? 'completed' : job.status === 'failed' ? 'failed' : 'in_progress',
-    message: `Current status: ${job.status}`,
+    message: job.status === 'completed' 
+      ? 'Site generation completed successfully' 
+      : job.status === 'failed' 
+      ? `Generation failed: ${job.error || 'Unknown error'}`
+      : `Current status: ${job.status}`,
     timestamp: new Date().toISOString(),
   };
   res.write(`data: ${JSON.stringify(initialData)}\n\n`);

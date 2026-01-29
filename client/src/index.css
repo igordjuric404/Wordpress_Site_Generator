@@ -1,48 +1,165 @@
+@import url('https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-gray-50 text-gray-900 antialiased;
+/* ========================================
+   Design System Variables
+   ======================================== */
+:root {
+  /* Color palette - Sophisticated slate with vibrant accents */
+  --color-surface: #fafbfc;
+  --color-surface-elevated: #ffffff;
+  --color-surface-sunken: #f4f6f8;
+  --color-border: #e2e6eb;
+  --color-border-subtle: #eef1f4;
+  
+  --color-text-primary: #1a1f27;
+  --color-text-secondary: #5c6774;
+  --color-text-tertiary: #8b95a3;
+  --color-text-inverse: #ffffff;
+  
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-accent-subtle: #eff6ff;
+  
+  --color-success: #059669;
+  --color-success-subtle: #ecfdf5;
+  --color-warning: #d97706;
+  --color-warning-subtle: #fffbeb;
+  --color-error: #dc2626;
+  --color-error-subtle: #fef2f2;
+  
+  /* Typography */
+  --font-sans: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+  
+  /* Spacing scale */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+  
+  /* Shadows - Refined and subtle */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.06), 0 2px 4px -1px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.06), 0 4px 6px -2px rgba(0, 0, 0, 0.03);
+  --shadow-focus: 0 0 0 3px rgba(37, 99, 235, 0.15);
+  
+  /* Border radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --radius-full: 9999px;
+  
+  /* Transitions */
+  --transition-fast: 120ms ease;
+  --transition-base: 180ms ease;
+  --transition-slow: 280ms ease;
 }
 
-/* Custom scrollbar */
+/* ========================================
+   Base Styles
+   ======================================== */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  font-family: var(--font-sans);
+  background: var(--color-surface);
+  color: var(--color-text-primary);
+  line-height: 1.6;
+  letter-spacing: -0.01em;
+}
+
+/* ========================================
+   Typography
+   ======================================== */
+h1, h2, h3, h4, h5, h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  letter-spacing: -0.02em;
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  letter-spacing: 0;
+}
+
+/* ========================================
+   Custom Scrollbar
+   ======================================== */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
-  @apply bg-gray-100;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-gray-300 rounded-full;
+  background: var(--color-border);
+  border-radius: var(--radius-full);
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  @apply bg-gray-400;
+  background: var(--color-text-tertiary);
+  border: 3px solid transparent;
+  background-clip: padding-box;
 }
 
-/* Progress bar animation */
+/* ========================================
+   Form Elements
+   ======================================== */
+input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  box-shadow: var(--shadow-focus);
+  border-color: var(--color-accent);
+}
+
+/* ========================================
+   Animations
+   ======================================== */
 @keyframes progress-pulse {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.75; }
 }
 
-.animate-progress-pulse {
-  animation: progress-pulse 2s ease-in-out infinite;
+@keyframes progress-glow {
+  0%, 100% { box-shadow: 0 0 8px rgba(37, 99, 235, 0.3); }
+  50% { box-shadow: 0 0 16px rgba(37, 99, 235, 0.5); }
 }
 
-/* Log entry animation */
-@keyframes slide-in {
+@keyframes slide-up {
   from {
     opacity: 0;
-    transform: translateY(-10px);
+    transform: translateY(8px);
   }
   to {
     opacity: 1;
@@ -50,6 +167,565 @@ body {
   }
 }
 
-.animate-slide-in {
-  animation: slide-in 0.2s ease-out;
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 1; }
+  100% { transform: scale(1.3); opacity: 0; }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-progress-pulse {
+  animation: progress-pulse 2s ease-in-out infinite;
+}
+
+.animate-progress-glow {
+  animation: progress-glow 2s ease-in-out infinite;
+}
+
+.animate-slide-up {
+  animation: slide-up 0.3s ease-out;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.2s ease-out;
+}
+
+.animate-spin-slow {
+  animation: spin 1.5s linear infinite;
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 1.5s ease-out infinite;
+}
+
+/* Shimmer loading effect */
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--color-surface-sunken) 0%,
+    var(--color-surface-elevated) 50%,
+    var(--color-surface-sunken) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+}
+
+/* ========================================
+   Utility Classes
+   ======================================== */
+.card {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow var(--transition-base), border-color var(--transition-base);
+}
+
+.card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-border);
+}
+
+.card-elevated {
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.section-title {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-text-tertiary);
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.625rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: var(--radius-full);
+  line-height: 1.4;
+}
+
+.status-badge-success {
+  background: var(--color-success-subtle);
+  color: var(--color-success);
+}
+
+.status-badge-warning {
+  background: var(--color-warning-subtle);
+  color: var(--color-warning);
+}
+
+.status-badge-error {
+  background: var(--color-error-subtle);
+  color: var(--color-error);
+}
+
+.status-badge-info {
+  background: var(--color-accent-subtle);
+  color: var(--color-accent);
+}
+
+.status-badge-neutral {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-secondary);
+}
+
+/* Button base styles */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  font-weight: 500;
+  font-size: 0.875rem;
+  border-radius: var(--radius-md);
+  transition: all var(--transition-fast);
+  cursor: pointer;
+  border: none;
+  text-decoration: none;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: var(--color-accent);
+  color: var(--color-text-inverse);
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-md);
+}
+
+.btn-secondary {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: var(--color-surface-elevated);
+  border-color: var(--color-text-tertiary);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-text-secondary);
+}
+
+.btn-ghost:hover:not(:disabled) {
+  background: var(--color-surface-sunken);
+  color: var(--color-text-primary);
+}
+
+.btn-danger {
+  background: var(--color-error-subtle);
+  color: var(--color-error);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: var(--color-error);
+  color: var(--color-text-inverse);
+}
+
+/* Icon button */
+.btn-icon {
+  padding: 0.5rem;
+  width: 2.25rem;
+  height: 2.25rem;
+}
+
+/* Input styles */
+.input {
+  width: 100%;
+  padding: 0.75rem 1rem;
+  background: var(--color-surface-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  transition: all var(--transition-fast);
+}
+
+.input::placeholder {
+  color: var(--color-text-tertiary);
+}
+
+.input:hover {
+  border-color: var(--color-text-tertiary);
+}
+
+.input:focus {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-focus);
+}
+
+/* ========================================
+   Staggered Animation Delays
+   ======================================== */
+.stagger-1 { animation-delay: 0.05s; }
+.stagger-2 { animation-delay: 0.1s; }
+.stagger-3 { animation-delay: 0.15s; }
+.stagger-4 { animation-delay: 0.2s; }
+.stagger-5 { animation-delay: 0.25s; }
+.stagger-6 { animation-delay: 0.3s; }
+
+/* ========================================
+   Vertical Progress Bar
+   ======================================== */
+.vertical-progress-container {
+  position: relative;
+  padding-left: 48px;
+  min-height: 100px;
+}
+
+/* Background track line - lighter for pending portion */
+.vertical-progress-track {
+  position: absolute;
+  left: 19px;
+  top: 32px; /* Align with center of first node (12px padding + 20px half node) */
+  width: 3px;
+  background: var(--color-border-subtle);
+  border-radius: var(--radius-full);
+  opacity: 0.6;
+  /* Height set via JS */
+}
+
+/* Filled progress line - darker/more prominent for completed portion */
+.vertical-progress-fill {
+  position: absolute;
+  left: 19px;
+  top: 32px; /* Align with center of first node */
+  width: 4px; /* Slightly wider for emphasis */
+  margin-left: -0.5px; /* Center the wider line */
+  background: linear-gradient(
+    180deg,
+    var(--color-success) 0%,
+    var(--color-success) 100%
+  );
+  border-radius: var(--radius-full);
+  box-shadow: 
+    0 0 12px rgba(5, 150, 105, 0.5),
+    0 0 4px rgba(5, 150, 105, 0.3);
+  z-index: 1;
+}
+
+/* Steps container */
+.vertical-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  position: relative;
+}
+
+/* Individual step */
+.vertical-progress-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 12px 16px 12px 0;
+  margin-left: -48px;
+  position: relative;
+  border-radius: var(--radius-lg);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  animation: fade-in 0.3s ease-out backwards;
+}
+
+.vertical-progress-step.pending {
+  opacity: 0.5;
+}
+
+/* Node wrapper for positioning pulse rings */
+.vertical-progress-node-wrapper {
+  position: relative;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Pulse rings for active step */
+.vertical-progress-pulse-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: pulse-ring 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+.vertical-progress-pulse-ring.pulse-1 {
+  animation-delay: 0s;
+}
+
+.vertical-progress-pulse-ring.pulse-2 {
+  animation-delay: 0.75s;
+}
+
+/* The node circle */
+.vertical-progress-node {
+  position: relative;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+  font-size: 0.875rem;
+  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 2;
+}
+
+/* Node states */
+.vertical-progress-node.completed {
+  background: linear-gradient(135deg, var(--color-success) 0%, #047857 100%);
+  color: white;
+  box-shadow: 
+    0 4px 12px rgba(5, 150, 105, 0.35),
+    0 0 0 4px var(--color-success-subtle);
+  transform: scale(1);
+}
+
+.vertical-progress-node.in_progress {
+  background: linear-gradient(135deg, var(--color-accent) 0%, #1d4ed8 100%);
+  color: white;
+  box-shadow: 
+    0 4px 20px rgba(37, 99, 235, 0.45),
+    0 0 0 4px var(--color-accent-subtle);
+  transform: scale(1);
+  animation: progress-glow 2s ease-in-out infinite;
+}
+
+.vertical-progress-node.pending {
+  background: var(--color-surface-elevated);
+  color: var(--color-text-tertiary);
+  border: 2px solid var(--color-border);
+  box-shadow: none;
+}
+
+/* Step number inside pending nodes */
+.vertical-progress-number {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+/* Spinner for active step */
+.vertical-progress-spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2.5px solid rgba(255, 255, 255, 0.3);
+  border-top-color: white;
+  animation: spin 1s linear infinite;
+}
+
+/* Label container */
+.vertical-progress-label-container {
+  flex: 1;
+  min-width: 0;
+  padding-top: 8px;
+}
+
+/* Step label text */
+.vertical-progress-label {
+  display: block;
+  font-weight: 500;
+  font-size: 0.9375rem;
+  line-height: 1.4;
+  transition: all 0.3s ease;
+}
+
+.vertical-progress-label.completed {
+  color: var(--color-text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: #000000;
+  text-decoration-thickness: 1.5px;
+}
+
+.vertical-progress-label.in_progress {
+  color: var(--color-accent);
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.vertical-progress-label.pending {
+  color: var(--color-text-secondary);
+}
+
+/* Status badge for active step */
+.vertical-progress-status-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: white;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35);
+  animation: progress-pulse 2s ease-in-out infinite;
+}
+
+/* Message for active step */
+.vertical-progress-message {
+  margin-top: 6px;
+  font-size: 0.8125rem;
+  color: var(--color-text-tertiary);
+  line-height: 1.5;
+  animation: fade-in 0.3s ease-out;
+}
+
+/* Check indicator dot for completed steps */
+.vertical-progress-check-indicator {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-success);
+  box-shadow: 0 0 8px rgba(5, 150, 105, 0.5);
+}
+
+/* Step completion animation */
+@keyframes step-complete {
+  0% {
+    transform: scale(0.8);
+    opacity: 0;
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+.vertical-progress-node.completed {
+  animation: step-complete 0.5s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+/* ========================================
+   Vertical Progress Bar - Responsive
+   ======================================== */
+@media (max-width: 640px) {
+  .vertical-progress-container {
+    padding-left: 40px;
+  }
+  
+  .vertical-progress-track,
+  .vertical-progress-fill {
+    left: 15px;
+  }
+  
+  .vertical-progress-step {
+    margin-left: -40px;
+    gap: 12px;
+    padding: 10px 12px 10px 0;
+  }
+  
+  .vertical-progress-node-wrapper {
+    width: 32px;
+    height: 32px;
+  }
+  
+  .vertical-progress-node {
+    width: 32px;
+    height: 32px;
+    font-size: 0.75rem;
+  }
+  
+  .vertical-progress-node.in_progress {
+    transform: scale(1.15);
+  }
+  
+  .vertical-progress-spinner {
+    width: 14px;
+    height: 14px;
+  }
+  
+  .vertical-progress-label {
+    font-size: 0.875rem;
+  }
+  
+  .vertical-progress-label.in_progress {
+    font-size: 0.9375rem;
+  }
+  
+  .vertical-progress-label-container {
+    padding-top: 5px;
+  }
+  
+  .vertical-progress-status-badge {
+    font-size: 0.625rem;
+    padding: 3px 8px;
+  }
+  
+  .vertical-progress-check-indicator {
+    right: 8px;
+    width: 5px;
+    height: 5px;
+  }
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  .vertical-progress-fill {
+    transition: none;
+  }
+  
+  .vertical-progress-step,
+  .vertical-progress-node,
+  .vertical-progress-label {
+    transition: none;
+    animation: none;
+  }
+  
+  .vertical-progress-pulse-ring {
+    animation: none;
+    display: none;
+  }
+  
+  .vertical-progress-spinner {
+    animation: none;
+    border: 2.5px solid white;
+  }
+  
+  .vertical-progress-status-badge {
+    animation: none;
+  }
+  
+  .vertical-progress-node.in_progress {
+    animation: none;
+  }
 }

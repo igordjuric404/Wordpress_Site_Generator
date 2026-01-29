@@ -1,8 +1,12 @@
 import { execa, type ExecaError } from 'execa';
+import path from 'path';
+import fs from 'fs-extra';
 import { createServiceLogger } from '../utils/logger.js';
 import { writeTempContent, removeTempFile } from './filesystem.service.js';
 
 const logger = createServiceLogger('wordpress');
+const PLUGIN_CACHE_DIR = path.join(process.cwd(), 'data', 'plugin-cache');
+const PLUGIN_CACHE_FILE = path.join(PLUGIN_CACHE_DIR, 'versions.json');
 
 interface WpCliOptions {
   sitePath: string;
@@ -16,8 +20,21 @@ async function wpCli(
   args: string[],
   options: WpCliOptions
 ): Promise<{ stdout: string; stderr: string }> {
-  const phpPath = process.env.PHP_PATH || '/Applications/XAMPP/xamppfiles/bin/php';
-  const wpCliPath = process.env.WPCLI_PATH || '/usr/local/bin/wp';
+  // Prefer Homebrew PHP, then XAMPP, then system PHP
+  let phpPath = process.env.PHP_PATH || process.env.WP_CLI_PHP;
+  if (!phpPath) {
+    const homebrewPhp = '/opt/homebrew/bin/php';
+    const xamppPhpPath = '/Applications/XAMPP/xamppfiles/bin/php';
+    if (fs.pathExistsSync(homebrewPhp)) {
+      phpPath = homebrewPhp;
+    } else if (fs.pathExistsSync(xamppPhpPath)) {
+      phpPath = xamppPhpPath;
+    } else {
+      phpPath = 'php'; // Use system PHP
+    }
+  }
+  
+  const wpCliPath = process.env.WPCLI_PATH || 'wp';
   const fullArgs = [
     '-d', 'memory_limit=512M',  // Set memory limit directly
     wpCliPath,
@@ -25,10 +42,17 @@ async function wpCli(
     `--path=${options.sitePath}`
   ];
 
-  // Add XAMPP binaries to PATH so WP-CLI can find mysql command
+  // Add Homebrew binaries to PATH first, then XAMPP if available
+  const homebrewBinPath = '/opt/homebrew/bin';
   const xamppBinPath = '/Applications/XAMPP/xamppfiles/bin';
   const currentPath = process.env.PATH || '';
-  const enhancedPath = `${xamppBinPath}:${currentPath}`;
+  let enhancedPath = currentPath;
+  if (fs.pathExistsSync(homebrewBinPath)) {
+    enhancedPath = `${homebrewBinPath}:${enhancedPath}`;
+  }
+  if (fs.pathExistsSync(xamppBinPath)) {
+    enhancedPath = `${xamppBinPath}:${enhancedPath}`;
+  }
 
   logger.info({ 
     command: 'php', 
@@ -60,6 +84,73 @@ async function wpCli(
     );
     throw new Error(`WP-CLI failed: ${execaErr.stderr || execaErr.message}`);
   }
+}
+
+function loadPluginCache(): Record<string, string> {
+  try {
+    if (!fs.existsSync(PLUGIN_CACHE_FILE)) {
+      return {};
+    }
+    const raw = fs.readFileSync(PLUGIN_CACHE_FILE, 'utf8');
+    return JSON.parse(raw) as Record<string, string>;
+  } catch (err) {
+    logger.warn({ err }, 'Failed to read plugin cache file');
+    return {};
+  }
+}
+
+function savePluginCache(cache: Record<string, string>): void {
+  try {
+    fs.ensureDirSync(PLUGIN_CACHE_DIR);
+    fs.writeFileSync(PLUGIN_CACHE_FILE, JSON.stringify(cache, null, 2));
+  } catch (err) {
+    logger.warn({ err }, 'Failed to write plugin cache file');
+  }
+}
+
+async function getLatestPluginVersion(sitePath: string, plugin: string): Promise<string> {
+  const { stdout } = await wpCli(['plugin', 'info', plugin, '--field=version', '--skip-plugins', '--skip-themes'], {
+    sitePath,
+  });
+  return stdout.trim();
+}
+
+async function ensurePluginCached(sitePath: string, plugin: string): Promise<{ zipPath: string; version: string }> {
+  fs.ensureDirSync(PLUGIN_CACHE_DIR);
+  const cache = loadPluginCache();
+  const zipPath = path.join(PLUGIN_CACHE_DIR, `${plugin}.zip`);
+
+  let latestVersion = cache[plugin];
+  try {
+    latestVersion = await getLatestPluginVersion(sitePath, plugin);
+  } catch (err) {
+    logger.warn({ plugin, err }, 'Failed to fetch latest plugin version');
+  }
+
+  const cachedVersion = cache[plugin];
+  const needsDownload = !latestVersion || cachedVersion !== latestVersion || !fs.existsSync(zipPath);
+
+  if (needsDownload) {
+    try {
+      const downloadArgs = ['plugin', 'download', plugin, '--force'];
+      if (latestVersion) {
+        downloadArgs.push(`--version=${latestVersion}`);
+      }
+      await wpCli(downloadArgs, { sitePath, cwd: PLUGIN_CACHE_DIR });
+      if (latestVersion) {
+        cache[plugin] = latestVersion;
+        savePluginCache(cache);
+      }
+      logger.info({ plugin, version: latestVersion || 'latest' }, 'Plugin cached');
+    } catch (err) {
+      if (!fs.existsSync(zipPath)) {
+        throw err;
+      }
+      logger.warn({ plugin, err }, 'Failed to update plugin cache, using existing zip');
+    }
+  }
+
+  return { zipPath, version: cache[plugin] || latestVersion || 'unknown' };
 }
 
 /**
@@ -153,9 +244,10 @@ export async function installPlugins(sitePath: string, plugins: string[]): Promi
 
   for (const plugin of plugins) {
     try {
-      await wpCli(['plugin', 'install', plugin, '--activate'], { sitePath });
+      const { zipPath, version } = await ensurePluginCached(sitePath, plugin);
+      await wpCli(['plugin', 'install', zipPath, '--activate', '--force'], { sitePath });
       installed.push(plugin);
-      logger.info({ sitePath, plugin }, 'Plugin installed successfully');
+      logger.info({ sitePath, plugin, version }, 'Plugin installed successfully');
     } catch (error) {
       failed.push(plugin);
       logger.warn({ sitePath, plugin, error }, 'Failed to install plugin, continuing...');
