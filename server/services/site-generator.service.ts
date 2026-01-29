@@ -16,9 +16,10 @@ import { createProgressHelper } from './progress.service.js';
 import * as wpService from './wordpress.service.js';
 import * as dbService from './database.service.js';
 import * as fsService from './filesystem.service.js';
-import { getPluginsForSite } from '../config/plugins.js';
+import { getPluginsForSite, REQUIRED_ECOMMERCE_PLUGINS, POST_GENERATION_PLUGINS } from '../config/plugins.js';
 import { DEFAULT_THEME } from '../config/themes.js';
 import { PLACEHOLDER_TEMPLATES, populateTemplate, getHomepageHtml } from '../config/placeholders.js';
+import { getProductsForNiche } from '../config/ecommerce/products.js';
 
 const logger = createServiceLogger('site-generator');
 
@@ -37,6 +38,7 @@ const GENERATION_STEPS = [
   'Installing theme',
   'Installing plugins',
   'Finalizing site',
+  'Installing security plugins',
 ];
 
 interface GenerationOptions {
@@ -120,6 +122,9 @@ async function runGenerationSteps(
   };
 
   try {
+    // Track page IDs for menu creation
+    const pageIds: { home?: number; about?: number; services?: number; contact?: number } = {};
+    
     // Step 1: Validate configuration
     await runStep(1, GENERATION_STEPS[0], async () => {
       if (!options.dryRun) {
@@ -242,6 +247,7 @@ async function runGenerationSteps(
           content: homepageContent,
         });
         await wpService.setHomepage(resolvedSitePath, homepageId);
+        pageIds.home = homepageId;
       } else {
         await simulateStep(800);
       }
@@ -260,7 +266,7 @@ async function runGenerationSteps(
       };
       const aboutContent = populateTemplate(templates.about, templateVars);
       if (!options.dryRun) {
-        await wpService.createPage(resolvedSitePath, {
+        pageIds.about = await wpService.createPage(resolvedSitePath, {
           title: 'About',
           content: aboutContent,
         });
@@ -282,7 +288,7 @@ async function runGenerationSteps(
       };
       const servicesContent = populateTemplate(templates.services, templateVars);
       if (!options.dryRun) {
-        await wpService.createPage(resolvedSitePath, {
+        pageIds.services = await wpService.createPage(resolvedSitePath, {
           title: 'Services',
           content: servicesContent,
         });
@@ -304,7 +310,7 @@ async function runGenerationSteps(
       };
       const contactContent = populateTemplate(templates.contact, templateVars);
       if (!options.dryRun) {
-        await wpService.createPage(resolvedSitePath, {
+        pageIds.contact = await wpService.createPage(resolvedSitePath, {
           title: 'Contact',
           content: contactContent,
         });
@@ -320,6 +326,33 @@ async function runGenerationSteps(
       const theme = config.theme || DEFAULT_THEME;
       if (!options.dryRun) {
         await wpService.installTheme(resolvedSitePath, theme);
+        
+        // Create navigation menu after theme is installed
+        try {
+          const locations = await wpService.getMenuLocations(resolvedSitePath);
+          const primaryLocation = locations[0] || 'primary';
+          
+          const menuId = await wpService.createMenu(resolvedSitePath, 'Main Menu', primaryLocation);
+          
+          // Add basic pages to menu: Home, About, Services, Contact
+          if (pageIds.home) {
+            await wpService.addPageToMenu(resolvedSitePath, menuId, pageIds.home);
+          }
+          if (pageIds.about) {
+            await wpService.addPageToMenu(resolvedSitePath, menuId, pageIds.about);
+          }
+          if (pageIds.services) {
+            await wpService.addPageToMenu(resolvedSitePath, menuId, pageIds.services);
+          }
+          if (pageIds.contact) {
+            await wpService.addPageToMenu(resolvedSitePath, menuId, pageIds.contact);
+          }
+          
+          addJobLog(jobId, 'info', 'Navigation menu created with basic pages');
+        } catch (menuErr) {
+          logger.warn({ sitePath: resolvedSitePath, menuErr }, 'Failed to create menu, continuing without it');
+          addJobLog(jobId, 'warning', 'Navigation menu creation failed, but site is functional');
+        }
       } else {
         await simulateStep(1000);
       }
@@ -329,24 +362,137 @@ async function runGenerationSteps(
     // Step 12: Install plugins
     await runStep(12, GENERATION_STEPS[11], async () => {
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
-      const plugins = getPluginsForSite(config.niche, config.siteType === 'ecommerce');
+      const isEcommerce = config.siteType === 'ecommerce';
+      const plugins = getPluginsForSite(config.niche, isEcommerce);
+      
       if (!options.dryRun) {
-        await wpService.installPlugins(resolvedSitePath, plugins);
+        addJobLog(jobId, 'info', `Installing plugins: ${plugins.join(', ')}`);
+        const result = await wpService.installPlugins(resolvedSitePath, plugins);
+        
+        // For e-commerce sites, verify required plugins are installed
+        if (isEcommerce) {
+          const missingRequired = REQUIRED_ECOMMERCE_PLUGINS.filter(
+            (plugin) => result.failed.includes(plugin)
+          );
+          if (missingRequired.length > 0) {
+            throw new Error(
+              `Required e-commerce plugin (WooCommerce) failed to install. ` +
+              `This may be due to network issues or WordPress.org API problems. ` +
+              `Please check the job logs for detailed error messages and try again. ` +
+              `If the problem persists, verify your internet connection and WP-CLI installation.`
+            );
+          }
+          addJobLog(jobId, 'info', 'WooCommerce installed and verified');
+        }
+        
+        addJobLog(jobId, 'info', `Plugins installed successfully: ${result.installed.join(', ')}`);
+        if (result.failed.length > 0) {
+          addJobLog(jobId, 'warning', `Some optional plugins failed: ${result.failed.join(', ')}`);
+        }
       } else {
         await simulateStep(2000);
+        addJobLog(jobId, 'info', `Plugins (dry run): ${plugins.join(', ')}`);
       }
-      addJobLog(jobId, 'info', `Plugins installed: ${plugins.join(', ')}`);
     });
 
-    // Step 13: Finalize
+    // Step 13: Finalize (includes WooCommerce setup and product seeding for e-commerce sites)
     await runStep(13, GENERATION_STEPS[12], async () => {
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
+      const isEcommerce = config.siteType === 'ecommerce';
+      
       if (!options.dryRun) {
+        if (isEcommerce) {
+          // Run full WooCommerce setup (pages, onboarding, defaults, permalinks)
+          addJobLog(jobId, 'info', 'Setting up WooCommerce...');
+          await wpService.setupWooCommerce(resolvedSitePath);
+          addJobLog(jobId, 'info', 'WooCommerce setup complete');
+          
+          // Add WooCommerce pages to the menu
+          try {
+            // Get the menu ID we created earlier
+            const { stdout: menuList } = await wpService.wpCli(
+              ['menu', 'list', '--format=ids'],
+              { sitePath: resolvedSitePath }
+            );
+            const menuId = parseInt(menuList.trim().split('\n')[0], 10);
+            
+            if (menuId && !isNaN(menuId)) {
+              await wpService.addWooCommercePagesToMenu(resolvedSitePath, menuId);
+              addJobLog(jobId, 'info', 'WooCommerce pages added to navigation menu');
+            }
+          } catch (menuErr) {
+            logger.warn({ sitePath: resolvedSitePath, menuErr }, 'Failed to add WooCommerce pages to menu');
+            addJobLog(jobId, 'warning', 'Could not add WooCommerce pages to menu, but they are accessible');
+          }
+          
+          // Seed sample products for this niche
+          addJobLog(jobId, 'info', 'Creating sample products...');
+          const productConfig = getProductsForNiche(config.niche);
+          const seedResult = await wpService.seedProducts(
+            resolvedSitePath,
+            productConfig.categories,
+            productConfig.products
+          );
+          addJobLog(
+            jobId,
+            'info',
+            `Sample products created: ${seedResult.productsCreated} products in ${seedResult.categoriesCreated} categories`
+          );
+        }
+        
+        // Final rewrite flush after all content and menus are created
+        // This ensures permalinks work for all pages, posts, and WooCommerce routes
         await wpService.flushRewriteRules(resolvedSitePath);
+        addJobLog(jobId, 'info', 'Rewrite rules flushed');
       } else {
-        await simulateStep(300);
+        await simulateStep(isEcommerce ? 2500 : 300);
+        if (isEcommerce) {
+          addJobLog(jobId, 'info', 'WooCommerce setup (dry run)');
+          addJobLog(jobId, 'info', 'Sample products (dry run)');
+        }
       }
       addJobLog(jobId, 'info', 'Site finalized');
+    });
+
+    // Step 14: Install post-generation plugins (Wordfence, etc.)
+    // These are installed last to avoid slowing down the generation process
+    await runStep(14, GENERATION_STEPS[13], async () => {
+      if (!options.dryRun) {
+        const resolvedSitePath = requireValue(sitePath, 'sitePath');
+        
+        if (POST_GENERATION_PLUGINS.length > 0) {
+          logger.info(
+            { sitePath: resolvedSitePath, plugins: POST_GENERATION_PLUGINS },
+            'Installing post-generation plugins'
+          );
+          addJobLog(
+            jobId,
+            'info',
+            `Installing security plugins: ${POST_GENERATION_PLUGINS.join(', ')}`
+          );
+          
+          const result = await wpService.installPlugins(resolvedSitePath, POST_GENERATION_PLUGINS);
+          
+          if (result.installed.length > 0) {
+            addJobLog(
+              jobId,
+              'info',
+              `Security plugins installed: ${result.installed.join(', ')}`
+            );
+          }
+          if (result.failed.length > 0) {
+            addJobLog(
+              jobId,
+              'warning',
+              `Some security plugins failed to install: ${result.failed.join(', ')}`
+            );
+          }
+        }
+      } else {
+        await simulateStep(300);
+        addJobLog(jobId, 'info', 'Security plugins (dry run)');
+      }
+      addJobLog(jobId, 'info', 'Post-generation plugins installed');
     });
 
     // Mark as completed - update to final step first

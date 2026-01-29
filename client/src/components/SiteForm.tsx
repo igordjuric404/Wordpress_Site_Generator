@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import type { SiteConfig } from '@shared/types';
-import { createSite, getNiches } from '../api/client';
+import { createSite, getNiches, getThemes, type ThemeOption } from '../api/client';
 
 interface FormData extends SiteConfig {
   dryRun?: boolean;
@@ -83,6 +83,8 @@ const IconLoader = () => (
 export default function SiteForm() {
   const navigate = useNavigate();
   const [niches, setNiches] = useState<NicheOption[]>([]);
+  const [themes, setThemes] = useState<ThemeOption[]>([]);
+  const [defaultTheme, setDefaultTheme] = useState<string>('astra');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -94,14 +96,18 @@ export default function SiteForm() {
   } = useForm<FormData>({
     defaultValues: {
       siteType: 'standard',
+      theme: 'astra',
     },
   });
 
   const selectedNiche = watch('niche');
   const selectedNicheData = niches.find((n) => n.id === selectedNiche);
+  const selectedTheme = watch('theme');
+  const selectedThemeData = themes.find((t) => t.slug === selectedTheme);
 
   useEffect(() => {
     loadNiches();
+    loadThemes();
   }, []);
 
   async function loadNiches() {
@@ -110,6 +116,16 @@ export default function SiteForm() {
       setNiches(data);
     } catch (err) {
       console.error('Failed to load niches:', err);
+    }
+  }
+
+  async function loadThemes() {
+    try {
+      const { themes: themeData, defaultTheme: defaultThemeSlug } = await getThemes();
+      setThemes(themeData);
+      setDefaultTheme(defaultThemeSlug);
+    } catch (err) {
+      console.error('Failed to load themes:', err);
     }
   }
 
@@ -438,6 +454,53 @@ export default function SiteForm() {
                   </div>
                 </label>
               </div>
+            </div>
+
+            {/* Theme Selection */}
+            <div>
+              <label 
+                htmlFor="theme" 
+                className="block text-sm font-medium mb-2"
+                style={{ color: 'var(--color-text-primary)' }}
+              >
+                Theme
+              </label>
+              <select
+                id="theme"
+                {...register('theme')}
+                className="input"
+                defaultValue={defaultTheme}
+              >
+                {themes.map((theme) => (
+                  <option key={theme.slug} value={theme.slug}>
+                    {theme.name} {theme.recommended ? '(Recommended)' : ''}
+                  </option>
+                ))}
+              </select>
+              {selectedThemeData && (
+                <div 
+                  className="mt-3 p-3 rounded-lg text-sm"
+                  style={{ background: 'var(--color-surface-sunken)' }}
+                >
+                  <p style={{ color: 'var(--color-text-secondary)' }}>
+                    {selectedThemeData.description}
+                  </p>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {selectedThemeData.features.map((feature, idx) => (
+                      <span 
+                        key={idx}
+                        className="text-xs px-2 py-1 rounded"
+                        style={{ 
+                          background: 'var(--color-accent-subtle)',
+                          color: 'var(--color-accent)'
+                        }}
+                      >
+                        {feature}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
 

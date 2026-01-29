@@ -98,6 +98,22 @@ export async function getNiches(): Promise<
   return response.data || [];
 }
 
+export interface ThemeOption {
+  slug: string;
+  name: string;
+  description: string;
+  features: string[];
+  recommended: boolean;
+}
+
+export async function getThemes(): Promise<{ themes: ThemeOption[]; defaultTheme: string }> {
+  const response = await request<ThemeOption[]>('/sites/themes');
+  return {
+    themes: response.data || [],
+    defaultTheme: (response as any).default || 'astra',
+  };
+}
+
 // Preflight API
 export async function getPreflight(): Promise<PreflightResult> {
   const response = await request<PreflightResult>('/preflight');

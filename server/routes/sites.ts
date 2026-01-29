@@ -5,6 +5,7 @@ import { SUPPORTED_NICHES } from '../../shared/types.js';
 import { getRecentJobs, getFailedJobs, getJob, getJobLogs, getJobsByStatus } from '../db/jobs.js';
 import { generateSite, deleteSite, resumeJob, cancelJob, bulkDeleteSites } from '../services/site-generator.service.js';
 import { createServiceLogger } from '../utils/logger.js';
+import { THEMES, DEFAULT_THEME } from '../config/themes.js';
 
 const logger = createServiceLogger('routes/sites');
 
@@ -54,6 +55,18 @@ sitesRouter.get('/niches', (_req: Request, res: Response) => {
     services: data.services,
   }));
   res.json({ success: true, data: niches });
+});
+
+// GET /api/sites/themes - List available themes
+sitesRouter.get('/themes', (_req: Request, res: Response) => {
+  const themes = THEMES.map((theme) => ({
+    slug: theme.slug,
+    name: theme.name,
+    description: theme.description,
+    features: theme.features,
+    recommended: theme.recommended,
+  }));
+  res.json({ success: true, data: themes, default: DEFAULT_THEME });
 });
 
 // GET /api/sites/:id - Get site details

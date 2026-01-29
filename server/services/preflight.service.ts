@@ -148,7 +148,7 @@ async function checkApacheRunning(): Promise<boolean> {
     'http://localhost/',
     'http://localhost:8080/',
     'http://localhost:8888/',
-  ].filter(Boolean);
+  ].filter((url): url is string => Boolean(url));
 
   for (const url of urlsToCheck) {
     try {

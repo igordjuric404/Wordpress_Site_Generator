@@ -6,24 +6,33 @@ export const CORE_PLUGINS = [
   'wordpress-seo',
   'updraftplus',
   'wp-super-cache',
+];
+
+// Plugins to install at the very end (after all other operations)
+// Wordfence causes 30+ second WP-CLI delays, so install it last to avoid slowing down generation
+export const POST_GENERATION_PLUGINS = [
   'wordfence',
 ];
 
 // E-commerce plugins for WooCommerce sites
+// WooCommerce is required; other plugins (Stripe, PDF invoices) can be added later
 export const ECOMMERCE_PLUGINS = [
   'woocommerce',
-  'woocommerce-gateway-stripe',
-  'woocommerce-pdf-invoices-packing-slips',
 ];
 
-// Niche-specific plugins
+// Required plugins that must install successfully for their respective site types
+export const REQUIRED_ECOMMERCE_PLUGINS = ['woocommerce'];
+
+// Niche-specific plugins (optional - failures won't block generation)
+// These can be expanded with industry-specific plugins as needed
+// Note: Plugin availability may change; installation failures are logged but don't block generation
 export const NICHE_PLUGINS: Record<NicheId, string[]> = {
   plumbing: [],
-  salon: [], // TODO: Add booking plugin when available
+  salon: [],
   dental: [],
   legal: [],
-  restaurant: [], // TODO: Add reservation plugin when available
-  fitness: [], // TODO: Add scheduling plugin when available
+  restaurant: [],
+  fitness: [],
   realestate: [],
   accounting: [],
   automotive: [],
