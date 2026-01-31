@@ -9,10 +9,8 @@ export const CORE_PLUGINS = [
 ];
 
 // Plugins to install at the very end (after all other operations)
-// Wordfence causes 30+ second WP-CLI delays, so install it last to avoid slowing down generation
-export const POST_GENERATION_PLUGINS = [
-  'wordfence',
-];
+// Note: Wordfence removed - causes fatal timeouts in local development
+export const POST_GENERATION_PLUGINS: string[] = [];
 
 // E-commerce plugins for WooCommerce sites
 // WooCommerce is required; other plugins (Stripe, PDF invoices) can be added later

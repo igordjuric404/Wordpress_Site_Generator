@@ -454,8 +454,9 @@ async function runGenerationSteps(
       addJobLog(jobId, 'info', 'Site finalized');
     });
 
-    // Step 14: Install post-generation plugins (Wordfence, etc.)
-    // These are installed last to avoid slowing down the generation process
+    // Step 14: Install post-generation plugins
+    // Reserved for plugins that should be installed after all other operations
+    // Currently empty - Wordfence removed due to local development incompatibility
     await runStep(14, GENERATION_STEPS[13], async () => {
       if (!options.dryRun) {
         const resolvedSitePath = requireValue(sitePath, 'sitePath');

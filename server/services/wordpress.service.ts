@@ -22,7 +22,8 @@ interface WpCliOptions {
  */
 export async function wpCli(
   args: string[],
-  options: WpCliOptions
+  options: WpCliOptions,
+  stdin?: string
 ): Promise<{ stdout: string; stderr: string }> {
   // Prefer Homebrew PHP, then XAMPP, then system PHP
   let phpPath = process.env.PHP_PATH || process.env.WP_CLI_PHP;
@@ -60,7 +61,8 @@ export async function wpCli(
 
   logger.info({ 
     command: 'php', 
-    args: fullArgs
+    args: fullArgs,
+    hasStdin: Boolean(stdin)
   }, 'Executing WP-CLI via PHP with memory limit');
 
   try {
@@ -68,6 +70,7 @@ export async function wpCli(
       cwd: options.cwd || options.sitePath,
       shell: false,
       timeout: 120000, // 2 minute timeout
+      input: stdin,
       env: {
         ...process.env,
         PATH: enhancedPath,
@@ -200,7 +203,32 @@ export async function createConfig(
     ],
     { sitePath }
   );
-  logger.info({ sitePath, dbName: config.dbName }, 'WordPress config created');
+  
+  // Add performance optimizations to wp-config.php
+  const wpConfigPath = path.join(sitePath, 'wp-config.php');
+  if (await fs.pathExists(wpConfigPath)) {
+    let wpConfig = await fs.readFile(wpConfigPath, 'utf-8');
+    
+    // Find the line with "/* That's all, stop editing!" and insert before it
+    const performanceConfig = `
+// Performance optimizations (auto-generated)
+define('WP_CACHE', true);
+define('CONCATENATE_SCRIPTS', false);
+define('WP_MEMORY_LIMIT', '256M');
+define('WP_MAX_MEMORY_LIMIT', '512M');
+
+`;
+    
+    wpConfig = wpConfig.replace(
+      /\/\* That's all, stop editing!/,
+      performanceConfig + "/* That's all, stop editing!"
+    );
+    
+    await fs.writeFile(wpConfigPath, wpConfig, 'utf-8');
+    logger.info({ sitePath }, 'Added performance optimizations to wp-config.php');
+  }
+  
+  logger.info({ sitePath, dbName: config.dbName }, 'WordPress config created with performance optimizations');
 }
 
 /**
