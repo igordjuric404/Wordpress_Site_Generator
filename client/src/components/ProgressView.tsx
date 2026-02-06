@@ -325,6 +325,7 @@ export default function ProgressView() {
   const isFailed = job.status === 'failed';
   const isCancelled = job.status === 'cancelled';
 
+  // Updated steps for Astra Starter Templates + AI content generation
   const ALL_STEPS = [
     'Validating configuration',
     'Creating site directory',
@@ -332,13 +333,13 @@ export default function ProgressView() {
     'Downloading WordPress',
     'Configuring WordPress',
     'Installing WordPress',
-    'Creating homepage',
-    'Creating about page',
-    'Creating services page',
-    'Creating contact page',
-    'Installing theme',
-    'Installing plugins',
+    'Installing Starter Templates plugin',  // Installs Astra + Starter Templates + Elementor
+    'Importing professional template',      // Imports selected template via WP-CLI
+    'Customizing site content',             // Replaces placeholders with business info
+    'Installing additional plugins',
     'Finalizing site',
+    'Installing security plugins',
+    'Generating AI content',               // Rewrites pages with Hugging Face Mistral
   ];
 
   const currentStep = latestEvent?.step ?? job.currentStep ?? 0;

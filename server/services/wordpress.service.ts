@@ -41,7 +41,7 @@ export async function wpCli(
   
   const wpCliPath = process.env.WPCLI_PATH || 'wp';
   const fullArgs = [
-    '-d', 'memory_limit=512M',  // Set memory limit directly
+    '-d', 'memory_limit=1024M',  // Set memory limit higher for large plugin installs
     wpCliPath,
     ...args,
     `--path=${options.sitePath}`
@@ -69,7 +69,7 @@ export async function wpCli(
     const result = await execa(phpPath, fullArgs, {
       cwd: options.cwd || options.sitePath,
       shell: false,
-      timeout: 120000, // 2 minute timeout
+      timeout: 300000, // 5 minute timeout for large plugin downloads
       input: stdin,
       env: {
         ...process.env,
@@ -214,8 +214,10 @@ export async function createConfig(
 // Performance optimizations (auto-generated)
 define('WP_CACHE', true);
 define('CONCATENATE_SCRIPTS', false);
-define('WP_MEMORY_LIMIT', '256M');
-define('WP_MAX_MEMORY_LIMIT', '512M');
+define('WP_MEMORY_LIMIT', '512M');
+define('WP_MAX_MEMORY_LIMIT', '1024M');
+@ini_set('memory_limit', '512M');
+@ini_set('max_execution_time', 300);
 
 `;
     

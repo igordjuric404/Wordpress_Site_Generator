@@ -1,4 +1,4 @@
-import type { Job, PreflightResult, SiteConfig, ApiResponse } from '@shared/types';
+import type { Job, PreflightResult, SiteConfig, ApiResponse, StarterTemplate } from '@shared/types';
 
 const API_BASE = '/api';
 
@@ -112,6 +112,28 @@ export async function getThemes(): Promise<{ themes: ThemeOption[]; defaultTheme
     themes: response.data || [],
     defaultTheme: (response as any).default || 'astra',
   };
+}
+
+// Templates API
+export async function getTemplates(): Promise<StarterTemplate[]> {
+  const response = await request<StarterTemplate[]>('/sites/templates');
+  return response.data || [];
+}
+
+export async function getTemplatesForNiche(nicheId: string): Promise<{
+  niche: string;
+  recommended: (StarterTemplate & { isDefault?: boolean })[];
+}> {
+  const response = await request<{
+    niche: string;
+    recommended: (StarterTemplate & { isDefault?: boolean })[];
+  }>(`/sites/templates/niche/${nicheId}`);
+  return response.data!;
+}
+
+export async function getTemplate(templateId: string): Promise<StarterTemplate> {
+  const response = await request<StarterTemplate>(`/sites/templates/${templateId}`);
+  return response.data!;
 }
 
 // Preflight API

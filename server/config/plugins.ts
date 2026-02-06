@@ -38,10 +38,12 @@ export const NICHE_PLUGINS: Record<NicheId, string[]> = {
 };
 
 /**
- * Get all plugins for a specific site configuration
+ * Get all plugins for a specific site configuration.
+ * Accepts any string niche - falls back to empty array for unknown niches.
  */
-export function getPluginsForSite(niche: NicheId, isEcommerce: boolean): string[] {
-  const plugins = [...CORE_PLUGINS, ...NICHE_PLUGINS[niche]];
+export function getPluginsForSite(niche: string, isEcommerce: boolean): string[] {
+  const nichePlugins = NICHE_PLUGINS[niche as NicheId] || [];
+  const plugins = [...CORE_PLUGINS, ...nichePlugins];
 
   if (isEcommerce) {
     plugins.push(...ECOMMERCE_PLUGINS);

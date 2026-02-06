@@ -415,6 +415,10 @@ export const NICHE_PRODUCTS: Record<NicheId, NicheProductConfig> = {
 /**
  * Get product configuration for a specific niche
  */
-export function getProductsForNiche(niche: NicheId): NicheProductConfig {
-  return NICHE_PRODUCTS[niche] || NICHE_PRODUCTS.general;
+/**
+ * Get product configuration for a niche.
+ * Accepts any string - falls back to 'general' for unknown niches.
+ */
+export function getProductsForNiche(niche: string): NicheProductConfig {
+  return NICHE_PRODUCTS[niche as NicheId] || NICHE_PRODUCTS.general;
 }

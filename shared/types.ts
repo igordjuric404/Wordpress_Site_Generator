@@ -1,16 +1,33 @@
 // Site configuration types
 export interface SiteConfig {
   businessName: string;
-  niche: NicheId;
+  niche: string;           // Free-form niche text (e.g. "plumbing", "organic bakery", "dog grooming")
   address: string;
   phone: string;
   email: string;
   additionalContext?: string;
   siteType: 'standard' | 'ecommerce';
   theme?: string;
+  templateId?: string; // Astra Starter Template numeric ID (e.g. "17988")
 }
 
-// Supported niches
+// Starter Template types
+export interface StarterTemplate {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  pageBuilder: 'elementor' | 'gutenberg';
+  category: string[];
+  isPremium: boolean;
+  previewUrl?: string;
+  thumbnailUrl?: string;
+  pages: string[];
+  isDefault?: boolean; // True if this is the recommended template for a niche
+}
+
+// Legacy niches kept for backward compatibility with existing DB records
+// and for the plugins/products lookup tables
 export const SUPPORTED_NICHES = {
   plumbing: {
     label: 'Plumbing',
@@ -72,8 +89,9 @@ export type JobStatus = 'pending' | 'in_progress' | 'completed' | 'failed' | 'ca
 export interface Job {
   id: string;
   businessName: string;
-  niche: NicheId;
+  niche: string;           // Free-form niche string
   siteType: 'standard' | 'ecommerce';
+  templateId?: string; // Astra Starter Template ID used
   config?: SiteConfig;
   status: JobStatus;
   currentStep: number;

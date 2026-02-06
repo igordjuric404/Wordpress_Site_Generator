@@ -2,17 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm } from 'react-hook-form';
 import type { SiteConfig } from '@shared/types';
-import { createSite, getNiches, getThemes, type ThemeOption } from '../api/client';
+import { createSite, getThemes, type ThemeOption } from '../api/client';
+import TemplateSelector from './TemplateSelector';
 
 interface FormData extends SiteConfig {
   dryRun?: boolean;
-}
-
-interface NicheOption {
-  id: string;
-  label: string;
-  pages: string[];
-  services: string[];
 }
 
 // Icons
@@ -82,9 +76,9 @@ const IconLoader = () => (
 
 export default function SiteForm() {
   const navigate = useNavigate();
-  const [niches, setNiches] = useState<NicheOption[]>([]);
   const [themes, setThemes] = useState<ThemeOption[]>([]);
   const [defaultTheme, setDefaultTheme] = useState<string>('astra');
+  const [selectedTemplate, setSelectedTemplate] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,27 +91,16 @@ export default function SiteForm() {
     defaultValues: {
       siteType: 'standard',
       theme: 'astra',
+      niche: '',
     },
   });
 
-  const selectedNiche = watch('niche');
-  const selectedNicheData = niches.find((n) => n.id === selectedNiche);
   const selectedTheme = watch('theme');
   const selectedThemeData = themes.find((t) => t.slug === selectedTheme);
 
   useEffect(() => {
-    loadNiches();
     loadThemes();
   }, []);
-
-  async function loadNiches() {
-    try {
-      const data = await getNiches();
-      setNiches(data);
-    } catch (err) {
-      console.error('Failed to load niches:', err);
-    }
-  }
 
   async function loadThemes() {
     try {
@@ -134,7 +117,13 @@ export default function SiteForm() {
     setError(null);
 
     try {
-      const job = await createSite({ ...data, dryRun });
+      // Include the selected template ID in the request
+      const payload = {
+        ...data,
+        templateId: selectedTemplate,
+        dryRun,
+      };
+      const job = await createSite(payload);
       navigate(`/progress/${job.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create site');
@@ -228,43 +217,53 @@ export default function SiteForm() {
               )}
             </div>
 
-            {/* Industry/Niche */}
+            {/* Niche - Free-form text input (Phase 2) */}
             <div>
               <label 
                 htmlFor="niche" 
                 className="block text-sm font-medium mb-2"
                 style={{ color: 'var(--color-text-primary)' }}
               >
-                Industry <span style={{ color: 'var(--color-error)' }}>*</span>
+                Niche / Industry <span style={{ color: 'var(--color-error)' }}>*</span>
               </label>
-              <select
+              <input
+                type="text"
                 id="niche"
-                {...register('niche', { required: 'Please select an industry' })}
+                {...register('niche', { required: 'Niche is required' })}
                 className="input"
+                placeholder="e.g. Plumbing, Organic Bakery, Dog Grooming, Real Estate..."
+              />
+              <p 
+                className="mt-1.5 text-xs"
+                style={{ color: 'var(--color-text-tertiary)' }}
               >
-                <option value="">Select an industry...</option>
-                {niches.map((niche) => (
-                  <option key={niche.id} value={niche.id}>
-                    {niche.label}
-                  </option>
-                ))}
-              </select>
+                Type any niche or industry. This will be used to tailor the AI-generated content.
+              </p>
               {errors.niche && (
                 <p className="mt-2 text-sm" style={{ color: 'var(--color-error)' }}>
                   {errors.niche.message}
                 </p>
               )}
-              {selectedNicheData && (
-                <div 
-                  className="mt-3 p-3 rounded-lg text-sm"
-                  style={{ background: 'var(--color-surface-sunken)' }}
-                >
-                  <span style={{ color: 'var(--color-text-tertiary)' }}>Pages to be created: </span>
-                  <span style={{ color: 'var(--color-text-secondary)' }}>
-                    {selectedNicheData.pages.join(' • ')}
-                  </span>
-                </div>
-              )}
+            </div>
+
+            {/* Template Selection - Always show (Phase 3: no niche filtering) */}
+            <div>
+              <label 
+                className="block text-sm font-medium mb-3"
+                style={{ color: 'var(--color-text-primary)' }}
+              >
+                Choose Template Design
+              </label>
+              <TemplateSelector
+                selectedTemplateId={selectedTemplate}
+                onSelect={setSelectedTemplate}
+              />
+              <p 
+                className="mt-2 text-xs"
+                style={{ color: 'var(--color-text-tertiary)' }}
+              >
+                All free Astra Starter Templates. Click Preview to see a live demo.
+              </p>
             </div>
           </div>
 

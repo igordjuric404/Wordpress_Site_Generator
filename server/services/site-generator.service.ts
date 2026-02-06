@@ -2,7 +2,6 @@ import { nanoid } from 'nanoid';
 import crypto from 'crypto';
 import type { SiteConfig, Job } from '../../shared/types.js';
 import { createServiceLogger } from '../utils/logger.js';
-import { extractCity } from '../utils/sanitize.js';
 import {
   createJob,
   getJob,
@@ -16,29 +15,32 @@ import { createProgressHelper } from './progress.service.js';
 import * as wpService from './wordpress.service.js';
 import * as dbService from './database.service.js';
 import * as fsService from './filesystem.service.js';
+import * as starterTemplatesService from './starter-templates.service.js';
+import * as aiContentService from './ai-content.service.js';
 import { getPluginsForSite, REQUIRED_ECOMMERCE_PLUGINS, POST_GENERATION_PLUGINS } from '../config/plugins.js';
 import { DEFAULT_THEME } from '../config/themes.js';
-import { PLACEHOLDER_TEMPLATES, populateTemplate, getHomepageHtml } from '../config/placeholders.js';
+// Note: placeholders.ts is no longer used - templates are imported via Starter Templates
 import { getProductsForNiche } from '../config/ecommerce/products.js';
+import { getDefaultTemplateForNiche } from '../config/starter-templates.js';
 
 const logger = createServiceLogger('site-generator');
 
 // Generation steps for tracking progress
+// Updated for Astra Starter Templates integration + AI content generation
 const GENERATION_STEPS = [
-  'Validating configuration',
-  'Creating site directory',
-  'Creating database',
-  'Downloading WordPress',
-  'Configuring WordPress',
-  'Installing WordPress',
-  'Creating homepage',
-  'Creating about page',
-  'Creating services page',
-  'Creating contact page',
-  'Installing theme',
-  'Installing plugins',
-  'Finalizing site',
-  'Installing security plugins',
+  'Validating configuration',             // Step 1
+  'Creating site directory',              // Step 2
+  'Creating database',                    // Step 3
+  'Downloading WordPress',               // Step 4
+  'Configuring WordPress',               // Step 5
+  'Installing WordPress',                // Step 6
+  'Installing Starter Templates plugin', // Step 7: Install Astra + Starter Templates
+  'Importing professional template',     // Step 8: Import selected template via WP-CLI
+  'Customizing site content',            // Step 9: Replace placeholders with business info
+  'Installing additional plugins',       // Step 10: Install remaining plugins
+  'Finalizing site',                     // Step 11: WooCommerce setup, menus, permalinks
+  'Installing security plugins',         // Step 12: Post-generation plugins
+  'Generating AI content',              // Step 13: Rewrite pages with Hugging Face Mistral
 ];
 
 interface GenerationOptions {
@@ -122,9 +124,6 @@ async function runGenerationSteps(
   };
 
   try {
-    // Track page IDs for menu creation
-    const pageIds: { home?: number; about?: number; services?: number; contact?: number } = {};
-    
     // Step 1: Validate configuration
     await runStep(1, GENERATION_STEPS[0], async () => {
       if (!options.dryRun) {
@@ -237,130 +236,70 @@ async function runGenerationSteps(
       addJobLog(jobId, 'info', 'WordPress installed');
     });
 
-    // Step 7: Create homepage
+    // Step 7: Install Starter Templates plugin + Astra theme
     await runStep(7, GENERATION_STEPS[6], async () => {
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
-      const homepageContent = getHomepageHtml(config.niche, config.businessName);
+      
       if (!options.dryRun) {
-        const homepageId = await wpService.createPage(resolvedSitePath, {
-          title: 'Home',
-          content: homepageContent,
-        });
-        await wpService.setHomepage(resolvedSitePath, homepageId);
-        pageIds.home = homepageId;
+        // Install Astra theme first (required for Starter Templates)
+        const theme = config.theme || DEFAULT_THEME;
+        await wpService.installTheme(resolvedSitePath, theme);
+        addJobLog(jobId, 'info', `Theme installed: ${theme}`);
+        
+        // Install Starter Templates plugin
+        await starterTemplatesService.installStarterTemplatesPlugin(resolvedSitePath);
+        
+        // Ensure Elementor is installed (required for templates)
+        await starterTemplatesService.ensureElementorInstalled(resolvedSitePath);
+        
+        addJobLog(jobId, 'info', 'Starter Templates plugin and Elementor installed');
       } else {
-        await simulateStep(800);
+        await simulateStep(1500);
       }
-      addJobLog(jobId, 'info', 'Homepage created');
     });
 
-    // Step 8: About page
+    // Step 8: Import selected Starter Template
     await runStep(8, GENERATION_STEPS[7], async () => {
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
-      const templates = PLACEHOLDER_TEMPLATES[config.niche];
-      const templateVars = {
-        businessName: config.businessName,
-        city: extractCity(config.address),
-        phone: config.phone,
-        email: config.email,
-      };
-      const aboutContent = populateTemplate(templates.about, templateVars);
+      // Use the templateId from config, or get default for the niche
+      const templateId = config.templateId || getDefaultTemplateForNiche(config.niche);
+      
       if (!options.dryRun) {
-        pageIds.about = await wpService.createPage(resolvedSitePath, {
-          title: 'About',
-          content: aboutContent,
-        });
+        addJobLog(jobId, 'info', `Importing template: ${templateId}`);
+        
+        // Store the template ID in the job record
+        updateJobSiteInfo(jobId, { templateId });
+        
+        await starterTemplatesService.importTemplate(resolvedSitePath, templateId);
+        
+        addJobLog(jobId, 'info', 'Professional template imported successfully');
       } else {
-        await simulateStep(600);
+        await simulateStep(3000);
+        addJobLog(jobId, 'info', `Template import (dry run): ${templateId}`);
       }
-      addJobLog(jobId, 'info', 'About page created');
     });
 
-    // Step 9: Services page
+    // Step 9: Customize imported site content
     await runStep(9, GENERATION_STEPS[8], async () => {
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
-      const templates = PLACEHOLDER_TEMPLATES[config.niche];
-      const templateVars = {
-        businessName: config.businessName,
-        city: extractCity(config.address),
-        phone: config.phone,
-        email: config.email,
-      };
-      const servicesContent = populateTemplate(templates.services, templateVars);
+      
       if (!options.dryRun) {
-        pageIds.services = await wpService.createPage(resolvedSitePath, {
-          title: 'Services',
-          content: servicesContent,
+        await starterTemplatesService.customizeImportedSite(resolvedSitePath, {
+          businessName: config.businessName,
+          phone: config.phone,
+          email: config.email,
+          address: config.address,
         });
-      } else {
-        await simulateStep(600);
-      }
-      addJobLog(jobId, 'info', 'Services page created');
-    });
-
-    // Step 10: Contact page
-    await runStep(10, GENERATION_STEPS[9], async () => {
-      const resolvedSitePath = requireValue(sitePath, 'sitePath');
-      const templates = PLACEHOLDER_TEMPLATES[config.niche];
-      const templateVars = {
-        businessName: config.businessName,
-        city: extractCity(config.address),
-        phone: config.phone,
-        email: config.email,
-      };
-      const contactContent = populateTemplate(templates.contact, templateVars);
-      if (!options.dryRun) {
-        pageIds.contact = await wpService.createPage(resolvedSitePath, {
-          title: 'Contact',
-          content: contactContent,
-        });
-      } else {
-        await simulateStep(600);
-      }
-      addJobLog(jobId, 'info', 'Contact page created');
-    });
-
-    // Step 11: Install theme
-    await runStep(11, GENERATION_STEPS[10], async () => {
-      const resolvedSitePath = requireValue(sitePath, 'sitePath');
-      const theme = config.theme || DEFAULT_THEME;
-      if (!options.dryRun) {
-        await wpService.installTheme(resolvedSitePath, theme);
         
-        // Create navigation menu after theme is installed
-        try {
-          const locations = await wpService.getMenuLocations(resolvedSitePath);
-          const primaryLocation = locations[0] || 'primary';
-          
-          const menuId = await wpService.createMenu(resolvedSitePath, 'Main Menu', primaryLocation);
-          
-          // Add basic pages to menu: Home, About, Services, Contact
-          if (pageIds.home) {
-            await wpService.addPageToMenu(resolvedSitePath, menuId, pageIds.home);
-          }
-          if (pageIds.about) {
-            await wpService.addPageToMenu(resolvedSitePath, menuId, pageIds.about);
-          }
-          if (pageIds.services) {
-            await wpService.addPageToMenu(resolvedSitePath, menuId, pageIds.services);
-          }
-          if (pageIds.contact) {
-            await wpService.addPageToMenu(resolvedSitePath, menuId, pageIds.contact);
-          }
-          
-          addJobLog(jobId, 'info', 'Navigation menu created with basic pages');
-        } catch (menuErr) {
-          logger.warn({ sitePath: resolvedSitePath, menuErr }, 'Failed to create menu, continuing without it');
-          addJobLog(jobId, 'warning', 'Navigation menu creation failed, but site is functional');
-        }
+        addJobLog(jobId, 'info', 'Site content customized with business information');
       } else {
         await simulateStep(1000);
+        addJobLog(jobId, 'info', 'Content customization (dry run)');
       }
-      addJobLog(jobId, 'info', `Theme installed: ${theme}`);
     });
 
-    // Step 12: Install plugins
-    await runStep(12, GENERATION_STEPS[11], async () => {
+    // Step 10: Install additional plugins
+    await runStep(10, GENERATION_STEPS[9], async () => {
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
       const isEcommerce = config.siteType === 'ecommerce';
       const plugins = getPluginsForSite(config.niche, isEcommerce);
@@ -395,8 +334,8 @@ async function runGenerationSteps(
       }
     });
 
-    // Step 13: Finalize (includes WooCommerce setup and product seeding for e-commerce sites)
-    await runStep(13, GENERATION_STEPS[12], async () => {
+    // Step 11: Finalize (includes WooCommerce setup and product seeding for e-commerce sites)
+    await runStep(11, GENERATION_STEPS[10], async () => {
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
       const isEcommerce = config.siteType === 'ecommerce';
       
@@ -454,10 +393,10 @@ async function runGenerationSteps(
       addJobLog(jobId, 'info', 'Site finalized');
     });
 
-    // Step 14: Install post-generation plugins
+    // Step 12: Install post-generation plugins
     // Reserved for plugins that should be installed after all other operations
     // Currently empty - Wordfence removed due to local development incompatibility
-    await runStep(14, GENERATION_STEPS[13], async () => {
+    await runStep(12, GENERATION_STEPS[11], async () => {
       if (!options.dryRun) {
         const resolvedSitePath = requireValue(sitePath, 'sitePath');
         
@@ -494,6 +433,39 @@ async function runGenerationSteps(
         addJobLog(jobId, 'info', 'Security plugins (dry run)');
       }
       addJobLog(jobId, 'info', 'Post-generation plugins installed');
+    });
+
+    // Step 13: AI Content Generation using Hugging Face Mistral-7B-Instruct
+    await runStep(13, GENERATION_STEPS[12], async () => {
+      const resolvedSitePath = requireValue(sitePath, 'sitePath');
+      
+      if (!options.dryRun) {
+        addJobLog(jobId, 'info', `Starting AI content generation for niche: ${config.niche}`);
+        
+        try {
+          const aiResult = await aiContentService.generateAiContent(
+            resolvedSitePath,
+            config.niche,
+            (message) => {
+              addJobLog(jobId, 'info', `AI: ${message}`);
+            }
+          );
+          
+          addJobLog(
+            jobId,
+            'info',
+            `AI content generation complete: ${aiResult.pagesProcessed} pages rewritten, ${aiResult.pagesSkipped} skipped`
+          );
+        } catch (aiErr) {
+          // AI content generation is non-critical - log and continue
+          const errMsg = aiErr instanceof Error ? aiErr.message : 'Unknown AI error';
+          logger.warn({ sitePath: resolvedSitePath, err: aiErr }, 'AI content generation failed (non-critical)');
+          addJobLog(jobId, 'warning', `AI content generation failed: ${errMsg}. Site is still functional with template content.`);
+        }
+      } else {
+        await simulateStep(2000);
+        addJobLog(jobId, 'info', 'AI content generation (dry run)');
+      }
     });
 
     // Mark as completed - update to final step first
@@ -536,6 +508,7 @@ export async function generateSite(
     businessName: config.businessName,
     niche: config.niche,
     siteType: config.siteType,
+    templateId: config.templateId,
     totalSteps,
     config,
   });

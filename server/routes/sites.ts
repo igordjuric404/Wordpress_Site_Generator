@@ -1,26 +1,29 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
-import type { SiteConfig, NicheId } from '../../shared/types.js';
-import { SUPPORTED_NICHES } from '../../shared/types.js';
+import type { SiteConfig } from '../../shared/types.js';
 import { getRecentJobs, getFailedJobs, getJob, getJobLogs, getJobsByStatus } from '../db/jobs.js';
 import { generateSite, deleteSite, resumeJob, cancelJob, bulkDeleteSites } from '../services/site-generator.service.js';
 import { createServiceLogger } from '../utils/logger.js';
 import { THEMES, DEFAULT_THEME } from '../config/themes.js';
+import * as starterTemplatesService from '../services/starter-templates.service.js';
+import { getTemplateById } from '../config/starter-templates.js';
 
 const logger = createServiceLogger('routes/sites');
 
 export const sitesRouter = Router();
 
 // Validation schema for site creation
+// Phase 2: niche is now a free-form string (no longer an enum)
 const createSiteSchema = z.object({
   businessName: z.string().min(1, 'Business name is required').max(100),
-  niche: z.enum(Object.keys(SUPPORTED_NICHES) as [NicheId, ...NicheId[]]),
+  niche: z.string().min(1, 'Niche is required').max(200),
   address: z.string().min(1, 'Address is required').max(500),
   phone: z.string().min(1, 'Phone is required').max(50),
   email: z.string().email('Invalid email address'),
   additionalContext: z.string().max(2000).optional(),
   siteType: z.enum(['standard', 'ecommerce']).default('standard'),
   theme: z.string().optional(),
+  templateId: z.string().optional(), // Astra Starter Template numeric ID
   dryRun: z.boolean().optional(),
 });
 
@@ -46,15 +49,10 @@ sitesRouter.get('/failed', async (_req: Request, res: Response) => {
   }
 });
 
-// GET /api/sites/niches - List available niches
+// GET /api/sites/niches - List available niches (kept for backward compat)
 sitesRouter.get('/niches', (_req: Request, res: Response) => {
-  const niches = Object.entries(SUPPORTED_NICHES).map(([id, data]) => ({
-    id,
-    label: data.label,
-    pages: data.pages,
-    services: data.services,
-  }));
-  res.json({ success: true, data: niches });
+  // Return empty - niche is now a free-form text input
+  res.json({ success: true, data: [] });
 });
 
 // GET /api/sites/themes - List available themes
@@ -67,6 +65,47 @@ sitesRouter.get('/themes', (_req: Request, res: Response) => {
     recommended: theme.recommended,
   }));
   res.json({ success: true, data: themes, default: DEFAULT_THEME });
+});
+
+// GET /api/sites/templates - List ALL available Starter Templates
+sitesRouter.get('/templates', async (_req: Request, res: Response) => {
+  try {
+    const templates = await starterTemplatesService.listTemplates();
+    res.json({ success: true, data: templates });
+  } catch (err) {
+    logger.error({ error: err }, 'Failed to list templates');
+    res.status(500).json({ success: false, error: 'Failed to list templates' });
+  }
+});
+
+// GET /api/sites/templates/niche/:nicheId - Returns ALL templates (no niche filtering)
+sitesRouter.get('/templates/niche/:nicheId', async (req: Request<{ nicheId: string }>, res: Response) => {
+  try {
+    const { nicheId } = req.params;
+    const result = await starterTemplatesService.getTemplatesForNiche(nicheId);
+    res.json({ success: true, data: result });
+  } catch (err) {
+    logger.error({ error: err, nicheId: req.params.nicheId }, 'Failed to get templates for niche');
+    res.status(500).json({ success: false, error: 'Failed to get templates for niche' });
+  }
+});
+
+// GET /api/sites/templates/:id - Get a single template by ID
+sitesRouter.get('/templates/:id', async (req: Request<{ id: string }>, res: Response) => {
+  try {
+    const { id } = req.params;
+    const template = getTemplateById(id);
+    
+    if (!template) {
+      res.status(404).json({ success: false, error: 'Template not found' });
+      return;
+    }
+    
+    res.json({ success: true, data: template });
+  } catch (err) {
+    logger.error({ error: err, templateId: req.params.id }, 'Failed to get template');
+    res.status(500).json({ success: false, error: 'Failed to get template' });
+  }
 });
 
 // GET /api/sites/:id - Get site details
