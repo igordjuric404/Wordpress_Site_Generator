@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gradient Buttons</title>
+  <style>
+    html, body {
+      height: 100%;
+      margin: 0;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #f5f5f5;
+    }
+
+    .button-wrapper {
+      display: flex;
+      flex-direction: column;
+      gap: 40px; /* space between buttons */
+    }
+
+    .gradient-button {
+      padding: 180px 400px;
+      font-size: 18px;
+      font-weight: 600;
+      color: #2b2b2b;
+      border: none;
+      border-radius: 30px;
+      cursor: pointer;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.15);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .gradient-button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 28px rgba(0, 0, 0, 0.2);
+    }
+
+    /* First button */
+    .gradient-one {
+      background: linear-gradient(
+        90deg,
+        #5fad9e,
+        #7bc1a0,
+        #a7e3a6,
+        #e6f9b6,
+        #f1feaf
+      );
+    }
+
+    /* Second button (your colors) */
+    .gradient-two {
+      background: linear-gradient(
+        90deg,
+        #287aac,
+        #24bcbd,
+        #51e0b4,
+        #a4faa1,
+        #fefbc4
+      );
+    }
+  </style>
+</head>
+<body>
+  <div class="button-wrapper">
+    <button class="gradient-button gradient-one">
+      Click Me
+    </button>
+
+    <button class="gradient-button gradient-two">
+      Click Me Too
+    </button>
+  </div>
+</body>
+</html>

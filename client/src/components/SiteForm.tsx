@@ -7,6 +7,8 @@ import TemplateSelector from './TemplateSelector';
 
 interface FormData extends SiteConfig {
   dryRun?: boolean;
+  enableAiContent?: boolean;
+  dryRunAi?: boolean;
 }
 
 // Icons
@@ -77,7 +79,7 @@ const IconLoader = () => (
 export default function SiteForm() {
   const navigate = useNavigate();
   const [themes, setThemes] = useState<ThemeOption[]>([]);
-  const [defaultTheme, setDefaultTheme] = useState<string>('astra');
+  const [defaultTheme, setDefaultTheme] = useState<string>('spectra');
   const [selectedTemplate, setSelectedTemplate] = useState<string | undefined>();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,14 +91,21 @@ export default function SiteForm() {
     formState: { errors },
   } = useForm<FormData>({
     defaultValues: {
+      businessName: 'Valley Plumbing Pros',
+      niche: 'residential plumbing and drain cleaning',
+      address: '742 Evergreen Terrace, Springfield, IL 62704',
+      phone: '(555) 867-5309',
+      email: 'info@valleyplumbingpros.com',
       siteType: 'standard',
-      theme: 'astra',
-      niche: '',
+      theme: 'spectra',
+      enableAiContent: false,
     },
   });
 
   const selectedTheme = watch('theme');
   const selectedThemeData = themes.find((t) => t.slug === selectedTheme);
+  // Derive the builder stack from the selected theme — used to filter templates
+  const builderStack = selectedThemeData?.builderStack ?? null;
 
   useEffect(() => {
     loadThemes();
@@ -133,7 +142,7 @@ export default function SiteForm() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto animate-fade-in">
+    <div className="max-w-6xl mx-auto animate-fade-in">
       {/* Back Button */}
       <button
         onClick={() => navigate('/')}
@@ -159,12 +168,6 @@ export default function SiteForm() {
           >
             Create New Site
           </h1>
-          <p 
-            className="text-sm mt-1"
-            style={{ color: 'var(--color-text-secondary)' }}
-          >
-            Fill in your business details to generate a WordPress site
-          </p>
         </div>
 
         {/* Error */}
@@ -233,12 +236,6 @@ export default function SiteForm() {
                 className="input"
                 placeholder="e.g. Plumbing, Organic Bakery, Dog Grooming, Real Estate..."
               />
-              <p 
-                className="mt-1.5 text-xs"
-                style={{ color: 'var(--color-text-tertiary)' }}
-              >
-                Type any niche or industry. This will be used to tailor the AI-generated content.
-              </p>
               {errors.niche && (
                 <p className="mt-2 text-sm" style={{ color: 'var(--color-error)' }}>
                   {errors.niche.message}
@@ -246,7 +243,30 @@ export default function SiteForm() {
               )}
             </div>
 
-            {/* Template Selection - Always show (Phase 3: no niche filtering) */}
+            {/* Theme / Builder Stack Selection — Step 1 (must come before templates) */}
+            <div>
+              <label 
+                htmlFor="theme" 
+                className="block text-sm font-medium mb-2"
+                style={{ color: 'var(--color-text-primary)' }}
+              >
+                Theme / Builder Stack <span style={{ color: 'var(--color-error)' }}>*</span>
+              </label>
+              <select
+                id="theme"
+                {...register('theme')}
+                className="input"
+                defaultValue={defaultTheme}
+              >
+                {themes.map((theme) => (
+                  <option key={theme.slug} value={theme.slug}>
+                    {theme.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Template Selection — Step 2 (filtered by the chosen theme/builder stack) */}
             <div>
               <label 
                 className="block text-sm font-medium mb-3"
@@ -255,15 +275,10 @@ export default function SiteForm() {
                 Choose Template Design
               </label>
               <TemplateSelector
+                builderStack={builderStack}
                 selectedTemplateId={selectedTemplate}
                 onSelect={setSelectedTemplate}
               />
-              <p 
-                className="mt-2 text-xs"
-                style={{ color: 'var(--color-text-tertiary)' }}
-              >
-                All free Astra Starter Templates. Click Preview to see a live demo.
-              </p>
             </div>
           </div>
 
@@ -397,6 +412,50 @@ export default function SiteForm() {
               />
             </div>
 
+            {/* AI Content Rewrite Toggle */}
+            <div>
+              <label 
+                className="flex items-center gap-3 p-4 rounded-lg cursor-pointer transition-all"
+                style={{ 
+                  background: 'var(--color-surface-sunken)',
+                  border: '2px solid transparent'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  {...register('enableAiContent')}
+                  className="w-4 h-4"
+                  style={{ accentColor: 'var(--color-accent)' }}
+                />
+                <div>
+                  <span className="font-medium" style={{ color: 'var(--color-text-primary)' }}>
+                    Enable AI Content Rewrite
+                  </span>
+                </div>
+              </label>
+              {watch('enableAiContent') && (
+                <label 
+                  className="flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all mt-2 ml-4"
+                  style={{ 
+                    background: 'var(--color-surface)',
+                    border: '1px solid var(--color-border-subtle)'
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    {...register('dryRunAi')}
+                    className="w-3.5 h-3.5"
+                    style={{ accentColor: 'var(--color-warning)' }}
+                  />
+                  <div>
+                    <span className="text-sm" style={{ color: 'var(--color-text-secondary)' }}>
+                      Dry Run (log only, no API calls)
+                    </span>
+                  </div>
+                </label>
+              )}
+            </div>
+
             {/* Site Type */}
             <div>
               <label 
@@ -455,52 +514,6 @@ export default function SiteForm() {
               </div>
             </div>
 
-            {/* Theme Selection */}
-            <div>
-              <label 
-                htmlFor="theme" 
-                className="block text-sm font-medium mb-2"
-                style={{ color: 'var(--color-text-primary)' }}
-              >
-                Theme
-              </label>
-              <select
-                id="theme"
-                {...register('theme')}
-                className="input"
-                defaultValue={defaultTheme}
-              >
-                {themes.map((theme) => (
-                  <option key={theme.slug} value={theme.slug}>
-                    {theme.name} {theme.recommended ? '(Recommended)' : ''}
-                  </option>
-                ))}
-              </select>
-              {selectedThemeData && (
-                <div 
-                  className="mt-3 p-3 rounded-lg text-sm"
-                  style={{ background: 'var(--color-surface-sunken)' }}
-                >
-                  <p style={{ color: 'var(--color-text-secondary)' }}>
-                    {selectedThemeData.description}
-                  </p>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {selectedThemeData.features.map((feature, idx) => (
-                      <span 
-                        key={idx}
-                        className="text-xs px-2 py-1 rounded"
-                        style={{ 
-                          background: 'var(--color-accent-subtle)',
-                          color: 'var(--color-accent)'
-                        }}
-                      >
-                        {feature}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Submit Buttons */}

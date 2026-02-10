@@ -55,6 +55,7 @@ export function initDatabase(): void {
   `);
 
   ensureJobsColumn('config_json', 'TEXT');
+  ensureJobsColumn('template_id', 'TEXT');
 }
 
 export function getDatabase(): Database.Database {
@@ -80,6 +81,7 @@ function rowToJob(row: any): Job {
     businessName: row.business_name,
     niche: row.niche,
     siteType: row.site_type,
+    templateId: row.template_id || undefined,
     config,
     status: row.status,
     currentStep: row.current_step,
@@ -110,23 +112,25 @@ export function createJob(job: {
   businessName: string;
   niche: string;
   siteType: 'standard' | 'ecommerce';
+  templateId?: string;
   totalSteps: number;
   config?: SiteConfig;
 }): Job {
   const stmt = getDatabase().prepare(`
-    INSERT INTO jobs (id, business_name, niche, site_type, config_json, status, total_steps, created_at)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+    INSERT INTO jobs (id, business_name, niche, site_type, template_id, config_json, status, total_steps, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
   `);
   
   const createdAt = new Date().toISOString();
   const configJson = job.config ? JSON.stringify(job.config) : null;
-  stmt.run(job.id, job.businessName, job.niche, job.siteType, configJson, job.totalSteps, createdAt);
+  stmt.run(job.id, job.businessName, job.niche, job.siteType, job.templateId || null, configJson, job.totalSteps, createdAt);
   
   return {
     id: job.id,
     businessName: job.businessName,
     niche: job.niche as any,
     siteType: job.siteType,
+    templateId: job.templateId,
     config: job.config,
     status: 'pending',
     currentStep: 0,
@@ -206,7 +210,7 @@ export function resetJobForResume(jobId: string, step: number): void {
 
 export function updateJobSiteInfo(
   jobId: string,
-  info: { sitePath?: string; siteUrl?: string; dbName?: string; adminPassword?: string }
+  info: { sitePath?: string; siteUrl?: string; dbName?: string; adminPassword?: string; templateId?: string }
 ): void {
   const updates: string[] = [];
   const values: any[] = [];
@@ -226,6 +230,10 @@ export function updateJobSiteInfo(
   if (info.adminPassword !== undefined) {
     updates.push('admin_password = ?');
     values.push(info.adminPassword);
+  }
+  if (info.templateId !== undefined) {
+    updates.push('template_id = ?');
+    values.push(info.templateId);
   }
   
   if (updates.length === 0) return;
@@ -290,17 +298,34 @@ export function getAllJobs(): Job[] {
   return rows.map(rowToJob);
 }
 
+/**
+ * Optional SSE broadcaster — set by the progress service to emit log
+ * messages as real-time SSE events so the frontend sees sub-steps
+ * while the job is still running (not only after completion).
+ */
+let _logBroadcaster: ((jobId: string, message: string, level: string) => void) | null = null;
+
+export function setLogBroadcaster(fn: (jobId: string, message: string, level: string) => void): void {
+  _logBroadcaster = fn;
+}
+
 export function addJobLog(
   jobId: string,
   level: 'info' | 'warning' | 'error',
   message: string,
   metadata?: Record<string, any>
 ): void {
+  const ts = new Date().toISOString();
   const stmt = getDatabase().prepare(`
     INSERT INTO job_logs (job_id, timestamp, level, message, metadata)
     VALUES (?, ?, ?, ?, ?)
   `);
-  stmt.run(jobId, new Date().toISOString(), level, message, metadata ? JSON.stringify(metadata) : null);
+  stmt.run(jobId, ts, level, message, metadata ? JSON.stringify(metadata) : null);
+
+  // Also emit via SSE so the frontend gets real-time sub-step updates
+  if (_logBroadcaster) {
+    _logBroadcaster(jobId, message, level);
+  }
 }
 
 export function getJobLogs(jobId: string): Array<{

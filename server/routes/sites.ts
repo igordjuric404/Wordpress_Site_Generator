@@ -1,12 +1,12 @@
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { SiteConfig } from '../../shared/types.js';
-import { getRecentJobs, getFailedJobs, getJob, getJobLogs, getJobsByStatus } from '../db/jobs.js';
+import { getAllJobs, getFailedJobs, getJob, getJobLogs, getJobsByStatus } from '../db/jobs.js';
 import { generateSite, deleteSite, resumeJob, cancelJob, bulkDeleteSites } from '../services/site-generator.service.js';
 import { createServiceLogger } from '../utils/logger.js';
 import { THEMES, DEFAULT_THEME } from '../config/themes.js';
 import * as starterTemplatesService from '../services/starter-templates.service.js';
-import { getTemplateById } from '../config/starter-templates.js';
+import { getTemplateById, getTemplatesByStack, type BuilderStack } from '../config/starter-templates.js';
 
 const logger = createServiceLogger('routes/sites');
 
@@ -24,13 +24,15 @@ const createSiteSchema = z.object({
   siteType: z.enum(['standard', 'ecommerce']).default('standard'),
   theme: z.string().optional(),
   templateId: z.string().optional(), // Astra Starter Template numeric ID
+  enableAiContent: z.boolean().optional(), // Enable AI content rewrite (default: false)
+  dryRunAi: z.boolean().optional(), // AI dry run: extract & log but don't call API
   dryRun: z.boolean().optional(),
 });
 
 // GET /api/sites - List recent sites
 sitesRouter.get('/', async (_req: Request, res: Response) => {
   try {
-    const jobs = getRecentJobs(20);
+    const jobs = getAllJobs();
     res.json({ success: true, data: jobs });
   } catch (err) {
     logger.error({ error: err }, 'Failed to list sites');
@@ -55,7 +57,7 @@ sitesRouter.get('/niches', (_req: Request, res: Response) => {
   res.json({ success: true, data: [] });
 });
 
-// GET /api/sites/themes - List available themes
+// GET /api/sites/themes - List available themes with builder stack metadata
 sitesRouter.get('/themes', (_req: Request, res: Response) => {
   const themes = THEMES.map((theme) => ({
     slug: theme.slug,
@@ -63,14 +65,23 @@ sitesRouter.get('/themes', (_req: Request, res: Response) => {
     description: theme.description,
     features: theme.features,
     recommended: theme.recommended,
+    builderStack: theme.builderStack,   // null = no templates
+    wpThemeSlug: theme.wpThemeSlug,
   }));
   res.json({ success: true, data: themes, default: DEFAULT_THEME });
 });
 
-// GET /api/sites/templates - List ALL available Starter Templates
-sitesRouter.get('/templates', async (_req: Request, res: Response) => {
+// GET /api/sites/templates - List starter templates, optionally filtered by builder stack
+// Query param: ?stack=spectra|classic  (omit for all)
+sitesRouter.get('/templates', async (req: Request, res: Response) => {
   try {
-    const templates = await starterTemplatesService.listTemplates();
+    const stack = req.query.stack as string | undefined;
+    let templates;
+    if (stack && (stack === 'spectra' || stack === 'classic')) {
+      templates = getTemplatesByStack(stack as BuilderStack);
+    } else {
+      templates = await starterTemplatesService.listTemplates();
+    }
     res.json({ success: true, data: templates });
   } catch (err) {
     logger.error({ error: err }, 'Failed to list templates');

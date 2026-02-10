@@ -3,6 +3,8 @@ import type { StarterTemplate } from '@shared/types';
 import { getTemplates } from '../api/client';
 
 interface TemplateSelectorProps {
+  /** Builder stack to filter templates ('spectra' | 'classic' | null) */
+  builderStack: string | null;
   selectedTemplateId?: string;
   onSelect: (templateId: string) => void;
 }
@@ -36,6 +38,7 @@ const IconCheck = () => (
 );
 
 export default function TemplateSelector({
+  builderStack,
   selectedTemplateId,
   onSelect
 }: TemplateSelectorProps) {
@@ -44,16 +47,26 @@ export default function TemplateSelector({
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Re-fetch when builderStack changes
   useEffect(() => {
+    if (!builderStack) {
+      setTemplates([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
-    getTemplates()
+    getTemplates(builderStack)
       .then((data) => {
         setTemplates(data);
-        // Auto-select first template if none selected
-        if (!selectedTemplateId && data.length > 0) {
-          onSelect(data[0].id);
+        // Auto-select first template if current selection is not in this stack
+        if (data.length > 0) {
+          const currentInList = data.some((t) => t.id === selectedTemplateId);
+          if (!currentInList) {
+            onSelect(data[0].id);
+          }
         }
         setLoading(false);
       })
@@ -62,11 +75,28 @@ export default function TemplateSelector({
         setError('Failed to load templates. Please try again.');
         setLoading(false);
       });
-  }, []);
+  }, [builderStack]);
+
+  // No builder stack selected or theme has no templates
+  if (!builderStack) {
+    return (
+      <div
+        className="p-6 rounded-lg text-sm text-center"
+        style={{ background: 'var(--color-surface-sunken)', color: 'var(--color-text-tertiary)' }}
+      >
+        <p className="font-medium" style={{ color: 'var(--color-text-secondary)' }}>
+          No free templates available for this theme
+        </p>
+        <p className="mt-1 text-xs">
+          Choose Spectra or Astra (Classic) for access to free starter templates.
+        </p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
-      <div 
+      <div
         className="flex items-center justify-center gap-3 p-8"
         style={{ color: 'var(--color-text-secondary)' }}
       >
@@ -78,12 +108,9 @@ export default function TemplateSelector({
 
   if (error) {
     return (
-      <div 
+      <div
         className="p-4 rounded-lg text-sm"
-        style={{ 
-          background: 'var(--color-error-subtle)',
-          color: 'var(--color-error)'
-        }}
+        style={{ background: 'var(--color-error-subtle)', color: 'var(--color-error)' }}
       >
         {error}
       </div>
@@ -92,7 +119,7 @@ export default function TemplateSelector({
 
   if (templates.length === 0) {
     return (
-      <div 
+      <div
         className="p-4 rounded-lg text-sm text-center"
         style={{ background: 'var(--color-surface-sunken)', color: 'var(--color-text-tertiary)' }}
       >
@@ -124,114 +151,90 @@ export default function TemplateSelector({
       </div>
 
       {/* Template count */}
-      <div 
+      <div
         className="mb-3 text-xs"
         style={{ color: 'var(--color-text-tertiary)' }}
       >
-        {filteredTemplates.length} free template{filteredTemplates.length !== 1 ? 's' : ''} available
+        {filteredTemplates.length} template{filteredTemplates.length !== 1 ? 's' : ''} available
+        {' '}
       </div>
 
       {/* Template grid */}
-      <div 
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"
+      <div
+        className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-4 gap-4"
         style={{ maxHeight: '520px', overflowY: 'auto', paddingRight: '4px' }}
       >
         {filteredTemplates.map((template) => {
           const isSelected = selectedTemplateId === template.id;
-          
+
           return (
             <div
               key={template.id}
               className="template-card rounded-lg cursor-pointer transition-all overflow-hidden"
-              style={{ 
+              style={{
                 background: 'var(--color-surface-raised)',
-                border: isSelected 
-                  ? '2px solid var(--color-accent)' 
+                border: isSelected
+                  ? '2px solid var(--color-accent)'
                   : '2px solid var(--color-border-subtle)',
                 boxShadow: isSelected ? '0 0 0 3px var(--color-accent-subtle)' : undefined,
               }}
               onClick={() => onSelect(template.id)}
             >
-              {/* Template Preview Image Placeholder */}
-              <div 
-                className="h-28 flex items-center justify-center relative"
-                style={{ 
-                  background: 'linear-gradient(135deg, var(--color-accent-subtle) 0%, var(--color-surface-sunken) 100%)',
-                }}
-              >
-                {/* Selection Indicator */}
+              {/* Template Preview Image */}
+              <div className="h-32 relative overflow-hidden" style={{ background: 'var(--color-surface-sunken)' }}>
+                {template.previewUrl ? (
+                  <img
+                    src={`https://s0.wp.com/mshots/v1/${encodeURIComponent(template.previewUrl)}?w=400&h=300`}
+                    alt={template.name}
+                    className="w-full h-full object-cover object-top"
+                    loading="lazy"
+                    onError={(e) => {
+                      const img = e.currentTarget;
+                      img.style.display = 'none';
+                      if (img.nextElementSibling) (img.nextElementSibling as HTMLElement).style.display = 'flex';
+                    }}
+                  />
+                ) : null}
+                {/* Fallback text (hidden by default, shown on image error) */}
+                <div
+                  className="absolute inset-0 items-center justify-center"
+                  style={{ display: template.previewUrl ? 'none' : 'flex', background: 'linear-gradient(135deg, var(--color-accent-subtle) 0%, var(--color-surface-sunken) 100%)' }}
+                >
+                  <span className="text-xs font-medium" style={{ color: 'var(--color-text-tertiary)' }}>{template.name}</span>
+                </div>
                 {isSelected && (
-                  <div
-                    className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center"
-                    style={{ background: 'var(--color-accent)', color: 'white' }}
-                  >
+                  <div className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center" style={{ background: 'var(--color-accent)', color: 'white' }}>
                     <IconCheck />
                   </div>
                 )}
-                
-                <span 
-                  className="text-sm font-medium"
-                  style={{ color: 'var(--color-text-tertiary)' }}
-                >
-                  {template.name}
-                </span>
               </div>
 
               {/* Template Info */}
               <div className="p-3">
-                <h4 
-                  className="font-semibold text-sm"
-                  style={{ color: 'var(--color-text-primary)' }}
-                >
-                  {template.name}
-                </h4>
-                <p 
-                  className="text-xs mt-1 line-clamp-2"
-                  style={{ color: 'var(--color-text-secondary)' }}
-                >
-                  {template.description}
-                </p>
-                
-                {/* Categories */}
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {template.category.slice(0, 2).map((cat) => (
-                    <span
-                      key={cat}
-                      className="text-xs px-2 py-0.5 rounded"
-                      style={{ 
-                        background: 'var(--color-surface-sunken)',
-                        color: 'var(--color-text-tertiary)'
-                      }}
-                    >
-                      {cat}
-                    </span>
-                  ))}
-                  <span
-                    className="text-xs px-2 py-0.5 rounded"
-                    style={{ 
-                      background: 'var(--color-surface-sunken)',
-                      color: 'var(--color-text-tertiary)'
-                    }}
+                <div className="flex items-center justify-between gap-2">
+                  <h4
+                    className="font-semibold text-sm truncate"
+                    style={{ color: 'var(--color-text-primary)' }}
                   >
-                    {template.pageBuilder}
-                  </span>
-                </div>
+                    {template.name}
+                  </h4>
 
-                {/* Preview Link - external official preview */}
-                {template.previewUrl && (
-                  <button
-                    type="button"
-                    className="mt-2 flex items-center gap-1 text-xs font-medium transition-colors"
-                    style={{ color: 'var(--color-accent)' }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      window.open(template.previewUrl!, '_blank', 'noopener,noreferrer');
-                    }}
-                  >
-                    <IconExternalLink />
-                    Preview
-                  </button>
-                )}
+                  {/* Preview Link - external official preview */}
+                  {template.previewUrl && (
+                    <button
+                      type="button"
+                      className="flex items-center gap-1 text-xs font-medium transition-colors shrink-0"
+                      style={{ color: 'var(--color-accent)' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(template.previewUrl!, '_blank', 'noopener,noreferrer');
+                      }}
+                      title="Preview template"
+                    >
+                      <IconExternalLink />
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
           );
@@ -239,7 +242,7 @@ export default function TemplateSelector({
       </div>
 
       {filteredTemplates.length === 0 && searchTerm && (
-        <div 
+        <div
           className="p-4 rounded-lg text-sm text-center mt-2"
           style={{ background: 'var(--color-surface-sunken)', color: 'var(--color-text-tertiary)' }}
         >

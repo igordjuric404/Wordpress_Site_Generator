@@ -9,7 +9,12 @@ export interface SiteConfig {
   siteType: 'standard' | 'ecommerce';
   theme?: string;
   templateId?: string; // Astra Starter Template numeric ID (e.g. "17988")
+  enableAiContent?: boolean; // Whether to run AI copywriting step (default: false)
+  dryRunAi?: boolean; // If true, AI will extract text and log but NOT call the API
 }
+
+// Builder stack — determines which plugins must be installed alongside Astra theme
+export type BuilderStack = 'spectra' | 'classic';
 
 // Starter Template types
 export interface StarterTemplate {
@@ -17,13 +22,13 @@ export interface StarterTemplate {
   slug: string;
   name: string;
   description: string;
-  pageBuilder: 'elementor' | 'gutenberg';
+  builderStack: BuilderStack;
   category: string[];
   isPremium: boolean;
   previewUrl?: string;
   thumbnailUrl?: string;
   pages: string[];
-  isDefault?: boolean; // True if this is the recommended template for a niche
+  isDefault?: boolean;
 }
 
 // Legacy niches kept for backward compatibility with existing DB records
@@ -118,6 +123,13 @@ export interface ProgressEvent {
   message: string;
   timestamp: string;
   aiCost?: number;
+}
+
+/** Sub-step entry surfaced in the progress UI from job_logs */
+export interface SubStep {
+  timestamp: string;
+  level: 'info' | 'warning' | 'error';
+  message: string;
 }
 
 // Preflight check types

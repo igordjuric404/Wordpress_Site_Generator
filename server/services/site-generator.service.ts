@@ -18,7 +18,7 @@ import * as fsService from './filesystem.service.js';
 import * as starterTemplatesService from './starter-templates.service.js';
 import * as aiContentService from './ai-content.service.js';
 import { getPluginsForSite, REQUIRED_ECOMMERCE_PLUGINS, POST_GENERATION_PLUGINS } from '../config/plugins.js';
-import { DEFAULT_THEME } from '../config/themes.js';
+import { DEFAULT_THEME, getTheme } from '../config/themes.js';
 // Note: placeholders.ts is no longer used - templates are imported via Starter Templates
 import { getProductsForNiche } from '../config/ecommerce/products.js';
 import { getDefaultTemplateForNiche } from '../config/starter-templates.js';
@@ -133,7 +133,7 @@ async function runGenerationSteps(
       } else {
         await simulateStep(300);
       }
-      addJobLog(jobId, 'info', 'Configuration validated');
+      addJobLog(jobId, 'info', 'Validating site configuration');
     });
 
     // Step 2: Create site directory
@@ -186,7 +186,7 @@ async function runGenerationSteps(
       } else {
         await simulateStep(2000);
       }
-      addJobLog(jobId, 'info', 'WordPress downloaded');
+      addJobLog(jobId, 'info', 'Downloading WordPress core files');
     });
 
     // Step 5: Configure WordPress
@@ -208,7 +208,7 @@ async function runGenerationSteps(
       } else {
         await simulateStep(500);
       }
-      addJobLog(jobId, 'info', 'WordPress configured');
+      addJobLog(jobId, 'info', 'Writing wp-config.php');
     });
 
     // Step 6: Install WordPress
@@ -233,26 +233,42 @@ async function runGenerationSteps(
       }
 
       updateJobSiteInfo(jobId, { adminPassword });
-      addJobLog(jobId, 'info', 'WordPress installed');
+      addJobLog(jobId, 'info', 'Running WordPress installer');
     });
 
-    // Step 7: Install Starter Templates plugin + Astra theme
+    // Step 7: Install theme + builder plugins based on the selected stack
     await runStep(7, GENERATION_STEPS[6], async () => {
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
       
       if (!options.dryRun) {
-        // Install Astra theme first (required for Starter Templates)
-        const theme = config.theme || DEFAULT_THEME;
-        await wpService.installTheme(resolvedSitePath, theme);
-        addJobLog(jobId, 'info', `Theme installed: ${theme}`);
+        // Resolve the theme definition to find the correct WordPress theme slug and plugins
+        const themeSlug = config.theme || DEFAULT_THEME;
+        const themeDef = getTheme(themeSlug);
+        const wpTheme = themeDef?.wpThemeSlug || 'astra';
         
-        // Install Starter Templates plugin
+        // Install the WordPress theme
+        addJobLog(jobId, 'info', `Installing theme: ${wpTheme}`);
+        await wpService.installTheme(resolvedSitePath, wpTheme);
+        
+        // Install Starter Templates plugin (needed for import regardless of stack)
+        addJobLog(jobId, 'info', 'Installing Starter Templates plugin');
         await starterTemplatesService.installStarterTemplatesPlugin(resolvedSitePath);
         
-        // Ensure Elementor is installed (required for templates)
-        await starterTemplatesService.ensureElementorInstalled(resolvedSitePath);
-        
-        addJobLog(jobId, 'info', 'Starter Templates plugin and Elementor installed');
+        // Install builder-specific plugins based on the theme's stack
+        if (themeDef?.requiredPlugins && themeDef.requiredPlugins.length > 0) {
+          for (const plugin of themeDef.requiredPlugins) {
+            try {
+              addJobLog(jobId, 'info', `Installing builder plugin: ${plugin}`);
+              await wpService.wpCli(
+                ['plugin', 'install', plugin, '--activate'],
+                { sitePath: resolvedSitePath }
+              );
+            } catch (pluginErr) {
+              logger.warn({ sitePath: resolvedSitePath, plugin, err: pluginErr }, 'Builder plugin install failed');
+              addJobLog(jobId, 'warning', `Builder plugin failed: ${plugin}`);
+            }
+          }
+        }
       } else {
         await simulateStep(1500);
       }
@@ -265,14 +281,29 @@ async function runGenerationSteps(
       const templateId = config.templateId || getDefaultTemplateForNiche(config.niche);
       
       if (!options.dryRun) {
-        addJobLog(jobId, 'info', `Importing template: ${templateId}`);
+        addJobLog(jobId, 'info', `Importing template ${templateId}`);
         
         // Store the template ID in the job record
         updateJobSiteInfo(jobId, { templateId });
         
         await starterTemplatesService.importTemplate(resolvedSitePath, templateId);
         
-        addJobLog(jobId, 'info', 'Professional template imported successfully');
+        // Upgrade Spectra to 3.0 beta AFTER import — critical ordering
+        const themeSlug = config.theme || DEFAULT_THEME;
+        const themeDef = getTheme(themeSlug);
+        if (themeDef?.enableSpectraBeta) {
+          addJobLog(jobId, 'info', 'Upgrading Spectra to 3.0 beta');
+          try {
+            const betaUrl = 'https://downloads.wordpress.org/plugin/ultimate-addons-for-gutenberg.3.0.0-beta.2.zip';
+            await wpService.wpCli(
+              ['plugin', 'install', betaUrl, '--force', '--activate'],
+              { sitePath: resolvedSitePath }
+            );
+          } catch (betaErr) {
+            logger.warn({ sitePath: resolvedSitePath, err: betaErr }, 'Spectra beta upgrade failed');
+            addJobLog(jobId, 'warning', 'Spectra beta upgrade failed');
+          }
+        }
       } else {
         await simulateStep(3000);
         addJobLog(jobId, 'info', `Template import (dry run): ${templateId}`);
@@ -284,14 +315,15 @@ async function runGenerationSteps(
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
       
       if (!options.dryRun) {
+        addJobLog(jobId, 'info', 'Replacing placeholder content with business info');
         await starterTemplatesService.customizeImportedSite(resolvedSitePath, {
           businessName: config.businessName,
           phone: config.phone,
           email: config.email,
           address: config.address,
         });
-        
-        addJobLog(jobId, 'info', 'Site content customized with business information');
+        addJobLog(jobId, 'info', 'Setting site title and tagline');
+        addJobLog(jobId, 'info', 'Configuring contact form email recipient');
       } else {
         await simulateStep(1000);
         addJobLog(jobId, 'info', 'Content customization (dry run)');
@@ -305,7 +337,9 @@ async function runGenerationSteps(
       const plugins = getPluginsForSite(config.niche, isEcommerce);
       
       if (!options.dryRun) {
-        addJobLog(jobId, 'info', `Installing plugins: ${plugins.join(', ')}`);
+        for (const p of plugins) {
+          addJobLog(jobId, 'info', `Installing plugin: ${p}`);
+        }
         const result = await wpService.installPlugins(resolvedSitePath, plugins);
         
         // For e-commerce sites, verify required plugins are installed
@@ -316,17 +350,13 @@ async function runGenerationSteps(
           if (missingRequired.length > 0) {
             throw new Error(
               `Required e-commerce plugin (WooCommerce) failed to install. ` +
-              `This may be due to network issues or WordPress.org API problems. ` +
-              `Please check the job logs for detailed error messages and try again. ` +
-              `If the problem persists, verify your internet connection and WP-CLI installation.`
+              `This may be due to network issues or WordPress.org API problems.`
             );
           }
-          addJobLog(jobId, 'info', 'WooCommerce installed and verified');
         }
         
-        addJobLog(jobId, 'info', `Plugins installed successfully: ${result.installed.join(', ')}`);
         if (result.failed.length > 0) {
-          addJobLog(jobId, 'warning', `Some optional plugins failed: ${result.failed.join(', ')}`);
+          addJobLog(jobId, 'warning', `Failed optional plugins: ${result.failed.join(', ')}`);
         }
       } else {
         await simulateStep(2000);
@@ -341,48 +371,141 @@ async function runGenerationSteps(
       
       if (!options.dryRun) {
         if (isEcommerce) {
-          // Run full WooCommerce setup (pages, onboarding, defaults, permalinks)
-          addJobLog(jobId, 'info', 'Setting up WooCommerce...');
+          addJobLog(jobId, 'info', 'Configuring WooCommerce store');
           await wpService.setupWooCommerce(resolvedSitePath);
-          addJobLog(jobId, 'info', 'WooCommerce setup complete');
           
-          // Add WooCommerce pages to the menu
+          // Clean up duplicate WC pages that may have been created by template import + WC setup
+          addJobLog(jobId, 'info', 'Cleaning up duplicate WooCommerce pages');
+          await wpService.cleanupDuplicateWooCommercePages(resolvedSitePath);
+          
           try {
-            // Get the menu ID we created earlier
             const { stdout: menuList } = await wpService.wpCli(
               ['menu', 'list', '--format=ids'],
               { sitePath: resolvedSitePath }
             );
             const menuId = parseInt(menuList.trim().split('\n')[0], 10);
-            
             if (menuId && !isNaN(menuId)) {
+              addJobLog(jobId, 'info', 'Adding WooCommerce pages to navigation');
               await wpService.addWooCommercePagesToMenu(resolvedSitePath, menuId);
-              addJobLog(jobId, 'info', 'WooCommerce pages added to navigation menu');
             }
           } catch (menuErr) {
             logger.warn({ sitePath: resolvedSitePath, menuErr }, 'Failed to add WooCommerce pages to menu');
-            addJobLog(jobId, 'warning', 'Could not add WooCommerce pages to menu, but they are accessible');
           }
           
-          // Seed sample products for this niche
-          addJobLog(jobId, 'info', 'Creating sample products...');
+          // Extract product categories from template shortcodes and ensure they exist
+          addJobLog(jobId, 'info', 'Detecting template product categories');
+          const templateCategories = await wpService.extractTemplateProductCategories(resolvedSitePath);
+          if (templateCategories.length > 0) {
+            addJobLog(jobId, 'info', `Found template product categories: ${templateCategories.join(', ')}`);
+            await wpService.ensureProductCategories(resolvedSitePath, templateCategories);
+          }
+          
+          addJobLog(jobId, 'info', 'Seeding sample products');
           const productConfig = getProductsForNiche(config.niche);
+          
+          // If template references specific categories, seed products into those instead
+          if (templateCategories.length > 0) {
+            // Seed products distributed across template categories
+            let categoryIndex = 0;
+            for (const product of productConfig.products) {
+              const catSlug = templateCategories[categoryIndex % templateCategories.length];
+              // Override the product's category to match template expectations
+              product.category = catSlug;
+              categoryIndex++;
+            }
+          }
+          
           const seedResult = await wpService.seedProducts(
             resolvedSitePath,
             productConfig.categories,
             productConfig.products
           );
-          addJobLog(
-            jobId,
-            'info',
-            `Sample products created: ${seedResult.productsCreated} products in ${seedResult.categoriesCreated} categories`
-          );
+          addJobLog(jobId, 'info', `Created ${seedResult.productsCreated} products in ${seedResult.categoriesCreated} categories`);
         }
         
-        // Final rewrite flush after all content and menus are created
-        // This ensures permalinks work for all pages, posts, and WooCommerce routes
+        // Deactivate conflicting plugins (modern-cart causes double cart sidebar)
+        addJobLog(jobId, 'info', 'Deactivating conflicting plugins');
+        for (const pluginToDisable of ['modern-cart', 'woo-cart-abandonment-recovery', 'cartflows']) {
+          try {
+            await wpService.wpCli(['plugin', 'deactivate', pluginToDisable], { sitePath: resolvedSitePath });
+          } catch { /* plugin may not be installed */ }
+        }
+        
+        // Clean up navigation menus: remove duplicates, admin links
+        addJobLog(jobId, 'info', 'Cleaning up navigation menus');
+        await wpService.cleanupMenuItems(resolvedSitePath);
+        
+        // Disable admin bar and Astra account icon on frontend
+        addJobLog(jobId, 'info', 'Disabling admin bar on frontend');
+        await wpService.disableAdminBar(resolvedSitePath);
+        
+        // Disable Astra header account element (the WP-admin/login icon)
+        try {
+          // Remove the account icon from Astra's header builder
+          await wpService.wpCli(
+            ['option', 'patch', 'update', 'astra-settings', 'header-account-login-style', 'none'],
+            { sitePath: resolvedSitePath }
+          );
+          await wpService.wpCli(
+            ['option', 'patch', 'update', 'astra-settings', 'header-account-logout-style', 'none'],
+            { sitePath: resolvedSitePath }
+          );
+          // Also try setting the account visibility to hidden
+          await wpService.wpCli(
+            ['eval', `
+              $settings = get_option('astra-settings', array());
+              // Remove account from header builder elements
+              foreach (['header-desktop-items', 'header-mobile-items'] as $key) {
+                if (isset($settings[$key])) {
+                  $json = json_encode($settings[$key]);
+                  $json = str_replace('"account"', '""', $json);
+                  $settings[$key] = json_decode($json, true);
+                }
+              }
+              update_option('astra-settings', $settings);
+              echo 'done';
+            `],
+            { sitePath: resolvedSitePath }
+          );
+        } catch {
+          // Astra settings may not exist or may have different structure
+        }
+        
+        addJobLog(jobId, 'info', 'Flushing rewrite rules');
         await wpService.flushRewriteRules(resolvedSitePath);
-        addJobLog(jobId, 'info', 'Rewrite rules flushed');
+
+        addJobLog(jobId, 'info', 'Disabling WP Cron');
+        try {
+          await wpService.wpCli(
+            ['config', 'set', 'DISABLE_WP_CRON', 'true', '--raw', '--type=constant'],
+            { sitePath: resolvedSitePath }
+          );
+        } catch (cronErr) {
+          logger.warn({ sitePath: resolvedSitePath, err: cronErr }, 'Failed to disable WP Cron');
+        }
+
+        addJobLog(jobId, 'info', 'Enabling page caching');
+        try {
+          await wpService.wpCli(
+            ['option', 'update', 'wpsupercache_is_enabled', '1'],
+            { sitePath: resolvedSitePath }
+          );
+          await wpService.wpCli(
+            ['config', 'set', 'WP_CACHE', 'true', '--raw', '--type=constant'],
+            { sitePath: resolvedSitePath }
+          );
+        } catch (cacheErr) {
+          logger.warn({ sitePath: resolvedSitePath, err: cacheErr }, 'Failed to enable WP Super Cache');
+        }
+
+        try {
+          await wpService.wpCli(
+            ['option', 'update', 'heartbeat_control_behavior', 'disable_everywhere'],
+            { sitePath: resolvedSitePath }
+          );
+        } catch {
+          // Heartbeat control may not be installed
+        }
       } else {
         await simulateStep(isEcommerce ? 2500 : 300);
         if (isEcommerce) {
@@ -401,46 +524,34 @@ async function runGenerationSteps(
         const resolvedSitePath = requireValue(sitePath, 'sitePath');
         
         if (POST_GENERATION_PLUGINS.length > 0) {
-          logger.info(
-            { sitePath: resolvedSitePath, plugins: POST_GENERATION_PLUGINS },
-            'Installing post-generation plugins'
-          );
-          addJobLog(
-            jobId,
-            'info',
-            `Installing security plugins: ${POST_GENERATION_PLUGINS.join(', ')}`
-          );
-          
+          addJobLog(jobId, 'info', `Installing security plugins: ${POST_GENERATION_PLUGINS.join(', ')}`);
           const result = await wpService.installPlugins(resolvedSitePath, POST_GENERATION_PLUGINS);
-          
-          if (result.installed.length > 0) {
-            addJobLog(
-              jobId,
-              'info',
-              `Security plugins installed: ${result.installed.join(', ')}`
-            );
-          }
           if (result.failed.length > 0) {
-            addJobLog(
-              jobId,
-              'warning',
-              `Some security plugins failed to install: ${result.failed.join(', ')}`
-            );
+            addJobLog(jobId, 'warning', `Failed: ${result.failed.join(', ')}`);
           }
         }
       } else {
         await simulateStep(300);
         addJobLog(jobId, 'info', 'Security plugins (dry run)');
       }
-      addJobLog(jobId, 'info', 'Post-generation plugins installed');
+      addJobLog(jobId, 'info', 'Security setup complete');
     });
 
     // Step 13: AI Content Generation using Hugging Face Mistral-7B-Instruct
+    // Only runs when enableAiContent is explicitly set to true
     await runStep(13, GENERATION_STEPS[12], async () => {
+      if (!config.enableAiContent) {
+        addJobLog(jobId, 'info', 'AI content generation skipped');
+        return;
+      }
+
       const resolvedSitePath = requireValue(sitePath, 'sitePath');
       
       if (!options.dryRun) {
-        addJobLog(jobId, 'info', `Starting AI content generation for niche: ${config.niche}`);
+        addJobLog(jobId, 'info', `Starting AI content generation for: ${config.niche}`);
+        if (config.additionalContext) {
+          addJobLog(jobId, 'info', `Using additional context: ${config.additionalContext.slice(0, 100)}`);
+        }
         
         try {
           const aiResult = await aiContentService.generateAiContent(
@@ -448,19 +559,16 @@ async function runGenerationSteps(
             config.niche,
             (message) => {
               addJobLog(jobId, 'info', `AI: ${message}`);
-            }
+            },
+            config.additionalContext,
+            config.dryRunAi === true
           );
           
-          addJobLog(
-            jobId,
-            'info',
-            `AI content generation complete: ${aiResult.pagesProcessed} pages rewritten, ${aiResult.pagesSkipped} skipped`
-          );
+          addJobLog(jobId, 'info', `AI: ${aiResult.pagesProcessed} pages rewritten, ${aiResult.pagesSkipped} skipped`);
         } catch (aiErr) {
-          // AI content generation is non-critical - log and continue
           const errMsg = aiErr instanceof Error ? aiErr.message : 'Unknown AI error';
-          logger.warn({ sitePath: resolvedSitePath, err: aiErr }, 'AI content generation failed (non-critical)');
-          addJobLog(jobId, 'warning', `AI content generation failed: ${errMsg}. Site is still functional with template content.`);
+          logger.warn({ sitePath: resolvedSitePath, err: aiErr }, 'AI content generation failed');
+          addJobLog(jobId, 'warning', `AI content generation failed: ${errMsg}`);
         }
       } else {
         await simulateStep(2000);

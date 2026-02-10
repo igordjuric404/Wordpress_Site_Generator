@@ -4,6 +4,10 @@ import type { ProgressEvent } from '@shared/types';
 interface UseSSEOptions {
   onComplete?: (event: ProgressEvent) => void;
   onError?: (error: Error) => void;
+  /** Seed initial step/totalSteps from the job to avoid regression on refresh */
+  initialStep?: number;
+  initialTotalSteps?: number;
+  initialStatus?: string;
 }
 
 export function useSSE(jobId: string | null, options: UseSSEOptions = {}) {
@@ -11,6 +15,11 @@ export function useSSE(jobId: string | null, options: UseSSEOptions = {}) {
   const [isConnected, setIsConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isComplete, setIsComplete] = useState(false);
+
+  // Seed values from the job loaded via REST so we never show 0% on refresh
+  const seedStep = options.initialStep ?? 0;
+  const seedTotal = options.initialTotalSteps ?? 13;
+  const seedStatus = options.initialStatus;
 
   const latestEvent = events.length > 0 ? events[events.length - 1] : null;
 
@@ -22,6 +31,13 @@ export function useSSE(jobId: string | null, options: UseSSEOptions = {}) {
     onCompleteRef.current = options.onComplete;
     onErrorRef.current = options.onError;
   }, [options.onComplete, options.onError]);
+
+  // Mark complete immediately if the initial status says so
+  useEffect(() => {
+    if (seedStatus === 'completed' || seedStatus === 'failed' || seedStatus === 'cancelled') {
+      setIsComplete(true);
+    }
+  }, [seedStatus]);
 
   useEffect(() => {
     if (!jobId || isComplete) return;
@@ -38,7 +54,7 @@ export function useSSE(jobId: string | null, options: UseSSEOptions = {}) {
     eventSource.onmessage = (event) => {
       try {
         const data: ProgressEvent & { final?: boolean } = JSON.parse(event.data);
-        
+
         // Only add unique events to prevent duplicates
         setEvents((prev) => {
           const isDuplicate = prev.some(
@@ -85,14 +101,22 @@ export function useSSE(jobId: string | null, options: UseSSEOptions = {}) {
     };
   }, [jobId, isComplete]);
 
+  // Compute current step: use the HIGHEST step seen across all events.
+  // Log-level events from addJobLog have step=0 / totalSteps=0 — they must
+  // never reset the progress bar, so we take the max, not the latest.
+  const maxEventStep = events.reduce((max, e) => Math.max(max, e.step), 0);
+  const maxEventTotal = events.reduce((max, e) => Math.max(max, e.totalSteps), 0);
+  const currentStep = Math.max(maxEventStep, seedStep);
+  const totalSteps = Math.max(maxEventTotal, seedTotal);
+
   return {
     events,
     latestEvent,
     isConnected,
     error,
     isComplete,
-    progress: latestEvent
-      ? Math.round((latestEvent.step / latestEvent.totalSteps) * 100)
-      : 0,
+    currentStep,
+    totalSteps,
+    progress: totalSteps > 0 ? Math.round((currentStep / totalSteps) * 100) : 0,
   };
 }

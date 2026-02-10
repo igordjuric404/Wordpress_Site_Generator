@@ -16,7 +16,10 @@
     "start:xampp": "node scripts/start-xampp.js",
     "start:mysql": "node scripts/start-mysql-auto.js",
     "kill-ports": "node scripts/kill-ports.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "sweep": "tsx scripts/template-sweep.ts",
+    "sweep:spectra": "tsx scripts/template-sweep.ts --stack spectra",
+    "sweep:classic": "tsx scripts/template-sweep.ts --stack classic"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.1",

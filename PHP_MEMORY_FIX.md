@@ -17,16 +17,16 @@ Updated `server/services/wordpress.service.ts` to use `WP_CLI_PHP_ARGS` environm
 ```typescript
 // Increase PHP memory limit for WP-CLI operations
 // WP-CLI uses PHP's -d flag to set ini directives
-env.WP_CLI_PHP_ARGS = '-d memory_limit=512M';
+env.WP_CLI_PHP_ARGS = '-d memory_limit=1024M';
 ```
 
-This tells WP-CLI to pass `-d memory_limit=512M` to PHP, which overrides the php.ini setting for that specific command.
+This tells WP-CLI to pass `-d memory_limit=1024M` to PHP, which overrides the php.ini setting for that specific command.
 
 ## How It Works
 WP-CLI respects the `WP_CLI_PHP_ARGS` environment variable and passes its value directly to the PHP binary:
 ```bash
 # Equivalent to running:
-php -d memory_limit=512M /path/to/wp-cli.phar core download
+php -d memory_limit=1024M /path/to/wp-cli.phar core download
 ```
 
 This ensures WP-CLI has enough memory for:
@@ -51,7 +51,7 @@ memory_limit = 128M
 
 To:
 ```ini
-memory_limit = 512M
+memory_limit = 1024M
 ```
 
 Then restart Apache:

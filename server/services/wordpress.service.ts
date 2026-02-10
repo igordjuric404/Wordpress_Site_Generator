@@ -599,8 +599,21 @@ export async function getWooCommercePageIds(sitePath: string): Promise<{
 export async function addWooCommercePagesToMenu(sitePath: string, menuId: number): Promise<void> {
   const wcPageIds = await getWooCommercePageIds(sitePath);
   
+  // Get existing menu items to avoid duplicates
+  let existingObjectIds = new Set<number>();
+  try {
+    const { stdout: menuItemsJson } = await wpCli(
+      ['menu', 'item', 'list', String(menuId), '--format=json', '--fields=object_id'],
+      { sitePath }
+    );
+    const items: Array<{ object_id: string }> = JSON.parse(menuItemsJson || '[]');
+    existingObjectIds = new Set(items.map(i => parseInt(i.object_id, 10)).filter(id => !isNaN(id)));
+  } catch {
+    logger.warn({ sitePath, menuId }, 'Could not list existing menu items for dedup check');
+  }
+
   // Add Shop page (most important for e-commerce)
-  if (wcPageIds.shop && !isNaN(wcPageIds.shop)) {
+  if (wcPageIds.shop && !isNaN(wcPageIds.shop) && !existingObjectIds.has(wcPageIds.shop)) {
     try {
       await addPageToMenu(sitePath, menuId, wcPageIds.shop);
       logger.info({ sitePath, menuId, pageId: wcPageIds.shop }, 'Shop page added to menu');
@@ -610,7 +623,7 @@ export async function addWooCommercePagesToMenu(sitePath: string, menuId: number
   }
   
   // Add Cart page
-  if (wcPageIds.cart && !isNaN(wcPageIds.cart)) {
+  if (wcPageIds.cart && !isNaN(wcPageIds.cart) && !existingObjectIds.has(wcPageIds.cart)) {
     try {
       await addPageToMenu(sitePath, menuId, wcPageIds.cart);
       logger.info({ sitePath, menuId, pageId: wcPageIds.cart }, 'Cart page added to menu');
@@ -620,7 +633,7 @@ export async function addWooCommercePagesToMenu(sitePath: string, menuId: number
   }
   
   // Add My Account page (important for customer login)
-  if (wcPageIds.myAccount && !isNaN(wcPageIds.myAccount)) {
+  if (wcPageIds.myAccount && !isNaN(wcPageIds.myAccount) && !existingObjectIds.has(wcPageIds.myAccount)) {
     try {
       await addPageToMenu(sitePath, menuId, wcPageIds.myAccount);
       logger.info({ sitePath, menuId, pageId: wcPageIds.myAccount }, 'My Account page added to menu');
@@ -629,7 +642,7 @@ export async function addWooCommercePagesToMenu(sitePath: string, menuId: number
     }
   }
   
-  logger.info({ sitePath, menuId }, 'WooCommerce pages added to menu');
+  logger.info({ sitePath, menuId }, 'WooCommerce pages added to menu (duplicates skipped)');
 }
 
 // ============================================================================
@@ -653,7 +666,7 @@ export async function isWcCliAvailable(sitePath: string): Promise<boolean> {
  * WooCommerce page definitions with their shortcodes
  */
 const WOOCOMMERCE_PAGES = [
-  { title: 'Shop', slug: 'shop', content: '', option: 'woocommerce_shop_page_id' },
+  { title: 'Shop', slug: 'shop', content: '<!-- wp:woocommerce/all-products {"columns":3,"rows":3,"alignButtons":false,"contentVisibility":{"orderBy":true},"orderby":"date","layoutConfig":[["woocommerce/product-image",{"imageSizing":"thumbnail"}],["woocommerce/product-name"],["woocommerce/product-price"],["woocommerce/product-rating"],["woocommerce/product-button"]]} /-->', option: 'woocommerce_shop_page_id' },
   { title: 'Cart', slug: 'cart', content: '[woocommerce_cart]', option: 'woocommerce_cart_page_id' },
   { title: 'Checkout', slug: 'checkout', content: '[woocommerce_checkout]', option: 'woocommerce_checkout_page_id' },
   { title: 'My Account', slug: 'my-account', content: '[woocommerce_my_account]', option: 'woocommerce_myaccount_page_id' },
@@ -661,39 +674,56 @@ const WOOCOMMERCE_PAGES = [
 
 /**
  * Install WooCommerce pages (Shop, Cart, Checkout, My Account)
- * Uses WC-CLI if available, otherwise creates pages manually with shortcodes
+ * Always uses the manual dedup-aware path to avoid creating duplicates
+ * (e.g., Shop-2, Cart-2) when the template import already created them.
  */
 export async function setupWooCommercePages(sitePath: string): Promise<void> {
-  const wcCliAvailable = await isWcCliAvailable(sitePath);
-  
-  if (wcCliAvailable) {
-    // Use WC-CLI tool to install pages (creates any missing ones)
-    try {
-      await wpCli(['wc', 'tool', 'run', 'install_pages', '--user=admin'], { sitePath });
-      logger.info({ sitePath }, 'WooCommerce pages installed via WC-CLI');
-      return;
-    } catch (err) {
-      logger.warn({ sitePath, err }, 'WC-CLI install_pages failed, falling back to manual creation');
-    }
-  }
-  
-  // Fallback: Create pages manually with shortcodes
+  // Always use the manual path — it checks for existing pages first.
+  // The WC-CLI `install_pages` tool creates duplicates blindly.
   for (const page of WOOCOMMERCE_PAGES) {
     try {
-      // Check if page already exists
+      // Check if page already exists by slug
       const { stdout: existingId } = await wpCli(
         ['post', 'list', '--post_type=page', `--name=${page.slug}`, '--format=ids'],
         { sitePath }
       );
       
       if (existingId.trim()) {
-        // Page exists, just ensure the option is set
-        await wpCli(['option', 'update', page.option, existingId.trim()], { sitePath });
-        logger.info({ sitePath, page: page.title, pageId: existingId.trim() }, 'WooCommerce page already exists');
+        // Page exists, just ensure the WC option points to it
+        const firstId = existingId.trim().split(/\s+/)[0];
+        await wpCli(['option', 'update', page.option, firstId], { sitePath });
+        // If the page has no content and we have content to add, update it
+        if (page.content) {
+          try {
+            const { stdout: currentContent } = await wpCli(
+              ['post', 'get', firstId, '--field=post_content'],
+              { sitePath }
+            );
+            if (!currentContent || currentContent.trim().length === 0) {
+              await wpCli(['post', 'update', firstId, '--post_content=' + page.content], { sitePath });
+              logger.info({ sitePath, page: page.title }, 'Updated empty page with WooCommerce content');
+            }
+          } catch { /* ok */ }
+        }
+        logger.info({ sitePath, page: page.title, pageId: firstId }, 'WooCommerce page already exists — linked');
         continue;
       }
       
-      // Create the page
+      // Also check by title (templates may use different slugs)
+      const { stdout: byTitle } = await wpCli(
+        ['post', 'list', '--post_type=page', `--post_status=publish`, '--format=json', '--fields=ID,post_title'],
+        { sitePath }
+      );
+      const allPages: Array<{ ID: number; post_title: string }> = JSON.parse(byTitle || '[]');
+      const matchByTitle = allPages.find(p => p.post_title.toLowerCase() === page.title.toLowerCase());
+      
+      if (matchByTitle) {
+        await wpCli(['option', 'update', page.option, matchByTitle.ID.toString()], { sitePath });
+        logger.info({ sitePath, page: page.title, pageId: matchByTitle.ID }, 'WooCommerce page found by title — linked');
+        continue;
+      }
+      
+      // Create the page only if it truly doesn't exist
       const pageId = await createPage(sitePath, {
         title: page.title,
         content: page.content,
@@ -991,4 +1021,226 @@ export async function seedProducts(
   );
   
   return { categoriesCreated, productsCreated };
+}
+
+// ============================================================================
+// Post-import Cleanup Functions
+// ============================================================================
+
+/**
+ * Remove duplicate WooCommerce pages created by template import + WC setup.
+ * Pages like "Shop-2", "Cart-2", "My Account-2" are deleted, keeping the originals.
+ */
+export async function cleanupDuplicateWooCommercePages(sitePath: string): Promise<void> {
+  const duplicateSlugs = ['shop-2', 'cart-2', 'checkout-2', 'my-account-2'];
+  
+  for (const slug of duplicateSlugs) {
+    try {
+      const { stdout: ids } = await wpCli(
+        ['post', 'list', '--post_type=page', `--name=${slug}`, '--format=ids'],
+        { sitePath }
+      );
+      const pageIds = ids.trim().split(/\s+/).filter(Boolean);
+      for (const pid of pageIds) {
+        await wpCli(['post', 'delete', pid, '--force'], { sitePath });
+        logger.info({ sitePath, slug, pageId: pid }, 'Deleted duplicate WooCommerce page');
+      }
+    } catch {
+      // Page may not exist — that's fine
+    }
+  }
+}
+
+/**
+ * Remove WP-Admin, Login, and other admin-related items from navigation menus.
+ * Also removes duplicate menu items pointing to the same page.
+ */
+export async function cleanupMenuItems(sitePath: string): Promise<void> {
+  try {
+    // Get all menus
+    const { stdout: menuIds } = await wpCli(
+      ['menu', 'list', '--format=ids'],
+      { sitePath }
+    );
+    
+    for (const menuId of menuIds.trim().split(/\s+/).filter(Boolean)) {
+      try {
+        const { stdout: itemsJson } = await wpCli(
+          ['menu', 'item', 'list', menuId, '--format=json', '--fields=db_id,title,url,object_id,type'],
+          { sitePath }
+        );
+        const items: Array<{ db_id: string; title: string; url: string; object_id: string; type: string }> = JSON.parse(itemsJson || '[]');
+        
+        // Track seen object_ids for deduplication
+        const seenObjectIds = new Set<string>();
+        const itemsToRemove: string[] = [];
+        
+        for (const item of items) {
+          const titleLower = (item.title || '').toLowerCase();
+          const urlLower = (item.url || '').toLowerCase();
+          
+          // Remove admin-related menu items
+          if (
+            titleLower.includes('wp-admin') || titleLower.includes('wp admin') ||
+            titleLower.includes('wordpress admin') || titleLower === 'admin' ||
+            urlLower.includes('/wp-admin') || urlLower.includes('/wp-login')
+          ) {
+            itemsToRemove.push(item.db_id);
+            continue;
+          }
+          
+          // Remove duplicate pages (same object_id appearing multiple times)
+          if (item.type === 'post_type' && item.object_id && item.object_id !== '0') {
+            if (seenObjectIds.has(item.object_id)) {
+              itemsToRemove.push(item.db_id);
+              logger.info({ sitePath, menuId, title: item.title, objectId: item.object_id }, 'Removing duplicate menu item');
+              continue;
+            }
+            seenObjectIds.add(item.object_id);
+          }
+        }
+        
+        // Delete the flagged menu items
+        for (const dbId of itemsToRemove) {
+          try {
+            await wpCli(['menu', 'item', 'delete', dbId], { sitePath });
+            logger.info({ sitePath, menuId, dbId }, 'Removed menu item');
+          } catch {
+            // Item may have been already removed
+          }
+        }
+      } catch (err) {
+        logger.warn({ sitePath, menuId, err }, 'Failed to process menu items');
+      }
+    }
+  } catch (err) {
+    logger.warn({ sitePath, err }, 'Failed to list menus for cleanup');
+  }
+}
+
+/**
+ * Extract WooCommerce product category slugs referenced in page content shortcodes.
+ * Scans [products category="..."] shortcodes across all published pages.
+ */
+export async function extractTemplateProductCategories(sitePath: string): Promise<string[]> {
+  const categorySlugs = new Set<string>();
+  
+  try {
+    const { stdout: pagesJson } = await wpCli(
+      ['post', 'list', '--post_type=page', '--post_status=publish', '--format=json', '--fields=ID'],
+      { sitePath }
+    );
+    const pages: Array<{ ID: number }> = JSON.parse(pagesJson || '[]');
+    
+    for (const page of pages) {
+      try {
+        const { stdout: content } = await wpCli(
+          ['post', 'get', page.ID.toString(), '--field=post_content'],
+          { sitePath }
+        );
+        // Match [products ... category="slug1, slug2" ...]
+        const shortcodeMatches = content.matchAll(/\[products\s+[^\]]*category="([^"]+)"[^\]]*\]/gi);
+        for (const match of shortcodeMatches) {
+          const cats = match[1].split(',').map((c: string) => c.trim()).filter(Boolean);
+          cats.forEach((c: string) => categorySlugs.add(c));
+        }
+        // Also match category='...' (single quotes)
+        const shortcodeMatchesSingle = content.matchAll(/\[products\s+[^\]]*category='([^']+)'[^\]]*\]/gi);
+        for (const match of shortcodeMatchesSingle) {
+          const cats = match[1].split(',').map((c: string) => c.trim()).filter(Boolean);
+          cats.forEach((c: string) => categorySlugs.add(c));
+        }
+      } catch {
+        // Individual page fetch may fail
+      }
+    }
+  } catch {
+    logger.warn({ sitePath }, 'Failed to extract template product categories');
+  }
+  
+  return Array.from(categorySlugs);
+}
+
+/**
+ * Ensure WooCommerce product categories exist. Creates them if missing.
+ * Returns a map of slug -> category ID.
+ */
+export async function ensureProductCategories(
+  sitePath: string,
+  categorySlugs: string[]
+): Promise<Map<string, number>> {
+  const categoryMap = new Map<string, number>();
+  const wcCliAvailable = await isWcCliAvailable(sitePath);
+  
+  for (const slug of categorySlugs) {
+    try {
+      // Check if category already exists
+      if (wcCliAvailable) {
+        try {
+          const { stdout } = await wpCli(
+            ['wc', 'product_cat', 'list', `--slug=${slug}`, '--format=json', '--user=admin'],
+            { sitePath }
+          );
+          const cats = JSON.parse(stdout || '[]');
+          if (cats.length > 0) {
+            categoryMap.set(slug, cats[0].id);
+            continue;
+          }
+        } catch {
+          // Fall through to creation
+        }
+      }
+      
+      // Check via WP term
+      try {
+        const { stdout: termId } = await wpCli(
+          ['term', 'list', 'product_cat', `--slug=${slug}`, '--format=ids'],
+          { sitePath }
+        );
+        if (termId.trim()) {
+          categoryMap.set(slug, parseInt(termId.trim().split(/\s+/)[0], 10));
+          continue;
+        }
+      } catch {
+        // Fall through to creation
+      }
+      
+      // Create the category with a human-readable name from the slug
+      const name = slug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+      try {
+        const { stdout: newId } = await wpCli(
+          ['term', 'create', 'product_cat', name, `--slug=${slug}`, '--porcelain'],
+          { sitePath }
+        );
+        const id = parseInt(newId.trim(), 10);
+        if (!isNaN(id)) {
+          categoryMap.set(slug, id);
+          logger.info({ sitePath, slug, name, id }, 'Created product category from template');
+        }
+      } catch (err) {
+        logger.warn({ sitePath, slug, err }, 'Failed to create product category');
+      }
+    } catch (err) {
+      logger.warn({ sitePath, slug, err }, 'Failed to check/create product category');
+    }
+  }
+  
+  return categoryMap;
+}
+
+/**
+ * Disable WordPress admin bar on the frontend for all users.
+ */
+export async function disableAdminBar(sitePath: string): Promise<void> {
+  try {
+    await wpCli(['option', 'update', 'show_admin_bar', '0'], { sitePath });
+    // Also disable per-user via a mu-plugin
+    await wpCli(
+      ['eval', "file_put_contents(ABSPATH . 'wp-content/mu-plugins/disable-admin-bar.php', '<?php add_filter(\"show_admin_bar\", \"__return_false\");');"],
+      { sitePath }
+    );
+    logger.info({ sitePath }, 'Admin bar disabled on frontend');
+  } catch (err) {
+    logger.warn({ sitePath, err }, 'Failed to disable admin bar');
+  }
 }

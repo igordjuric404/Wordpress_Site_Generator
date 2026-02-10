@@ -104,19 +104,22 @@ export interface ThemeOption {
   description: string;
   features: string[];
   recommended: boolean;
+  builderStack: string | null; // 'spectra' | 'classic' | null
+  wpThemeSlug: string;
 }
 
 export async function getThemes(): Promise<{ themes: ThemeOption[]; defaultTheme: string }> {
   const response = await request<ThemeOption[]>('/sites/themes');
   return {
     themes: response.data || [],
-    defaultTheme: (response as any).default || 'astra',
+    defaultTheme: (response as any).default || 'spectra',
   };
 }
 
 // Templates API
-export async function getTemplates(): Promise<StarterTemplate[]> {
-  const response = await request<StarterTemplate[]>('/sites/templates');
+export async function getTemplates(stack?: string): Promise<StarterTemplate[]> {
+  const qs = stack ? `?stack=${encodeURIComponent(stack)}` : '';
+  const response = await request<StarterTemplate[]>(`/sites/templates${qs}`);
   return response.data || [];
 }
 

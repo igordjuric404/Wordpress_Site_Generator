@@ -1,12 +1,31 @@
 import { EventEmitter } from 'events';
 import type { ProgressEvent } from '../../shared/types.js';
 import { createServiceLogger } from '../utils/logger.js';
+import { setLogBroadcaster } from '../db/jobs.js';
 
 const logger = createServiceLogger('progress');
 
 // Global event emitter for progress updates
 const progressEmitter = new EventEmitter();
 progressEmitter.setMaxListeners(100); // Support many concurrent connections
+
+// Wire up the log broadcaster so addJobLog() calls emit SSE events in real-time.
+// This lets the frontend see sub-step logs while the job is running.
+setLogBroadcaster((jobId: string, message: string, _level: string) => {
+  const eventName = `progress:${jobId}`;
+  // Only emit if there are listeners (i.e. a client is connected)
+  if (progressEmitter.listenerCount(eventName) > 0) {
+    const event: ProgressEvent = {
+      jobId,
+      step: 0, // 0 indicates this is a log-level event, not a step advance
+      totalSteps: 0,
+      status: 'in_progress',
+      message,
+      timestamp: new Date().toISOString(),
+    };
+    progressEmitter.emit(eventName, event);
+  }
+});
 
 /**
  * Subscribe to progress events for a specific job

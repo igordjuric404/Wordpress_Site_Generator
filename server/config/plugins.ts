@@ -1,10 +1,11 @@
 import type { NicheId } from '../../shared/types.js';
 
 // Core plugins installed on all sites
+// NOTE: wordpress-seo (Yoast) and updraftplus removed — they add significant
+// boot overhead (~200ms each per request) and aren't needed for generated demo sites.
+// WP Super Cache is kept to enable page caching for faster loads.
 export const CORE_PLUGINS = [
   'contact-form-7',
-  'wordpress-seo',
-  'updraftplus',
   'wp-super-cache',
 ];
 

@@ -791,7 +791,7 @@ Run system preflight checks.
 
 - **PHP Path**: Auto-detected (Homebrew → XAMPP → system)
 - **Memory Limit**: Set to 512M via `-d memory_limit=512M`
-- **Timeout**: 120 seconds per command
+- **Timeout**: 300 seconds (5 minutes) per command to support large plugin downloads
 - **PATH Enhancement**: Adds Homebrew/XAMPP binaries to PATH
 - **Error Handling**: Throws errors with stderr output
 

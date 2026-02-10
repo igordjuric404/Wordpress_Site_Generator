@@ -522,10 +522,10 @@ input:focus, select:focus, textarea:focus {
 }
 
 .vertical-progress-node.pending {
-  background: var(--color-surface-elevated);
+  background: var(--color-surface);
   color: var(--color-text-tertiary);
   border: 2px solid var(--color-border);
-  box-shadow: none;
+  box-shadow: 0 0 0 4px var(--color-surface);
 }
 
 /* Step number inside pending nodes */
@@ -545,16 +545,16 @@ input:focus, select:focus, textarea:focus {
   animation: spin 1s linear infinite;
 }
 
-/* Label container */
+/* Label container - vertically centered with node */
 .vertical-progress-label-container {
   flex: 1;
   min-width: 0;
-  padding-top: 8px;
+  padding-top: 9px;
 }
 
 /* Step label text */
 .vertical-progress-label {
-  display: block;
+  display: inline;
   font-weight: 500;
   font-size: 0.9375rem;
   line-height: 1.4;
@@ -564,7 +564,7 @@ input:focus, select:focus, textarea:focus {
 .vertical-progress-label.completed {
   color: var(--color-text-tertiary);
   text-decoration: line-through;
-  text-decoration-color: #000000;
+  text-decoration-color: var(--color-text-tertiary);
   text-decoration-thickness: 1.5px;
 }
 
